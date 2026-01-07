@@ -1,0 +1,7 @@
+services:
+  apicli:
+    build: .
+    volumes:
+      - ./data:/root/.apicli
+    # Pass all arguments to the CLI
+    # Usage: docker-compose run --rm apicli get https://example.com
