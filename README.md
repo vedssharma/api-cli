@@ -5,6 +5,7 @@ A command-line HTTP client written in Go for making API requests, managing reque
 ## Features
 
 - **HTTP Requests**: Make GET, POST, PUT, PATCH, and DELETE requests with custom headers and body data
+- **Endpoint Aliases**: Create shortcuts for frequently used base URLs (e.g., `api` → `https://api.example.com`)
 - **Request History**: Automatically track and browse your request history
 - **Collections**: Organize related requests into collections and run them as a batch
 - **Color Output**: Pretty-printed JSON responses with color-coded status indicators
@@ -65,6 +66,38 @@ apicli get https://api.example.com/users -H "Authorization: Bearer token" -H "Ac
 apicli get https://api.example.com/users -v
 ```
 
+### Endpoint Aliases
+
+Create shortcuts for frequently used base URLs to simplify your requests.
+
+```bash
+# Create an alias
+apicli alias create myapi https://api.example.com/v1
+
+# Now use the alias in requests
+apicli get myapi/users              # Expands to https://api.example.com/v1/users
+apicli post myapi/users -d '{"name": "John"}'
+
+# List all aliases
+apicli alias list
+
+# Show a specific alias
+apicli alias show myapi
+
+# Delete an alias
+apicli alias delete myapi
+```
+
+**Example workflow with Star Wars API:**
+```bash
+# Create alias
+apicli alias create starwars https://www.swapi.tech/api
+
+# Use the alias
+apicli get starwars/people/1
+apicli get starwars/planets/3
+```
+
 ### Request History
 
 All requests are automatically saved to history (up to 100 entries).
@@ -117,6 +150,7 @@ apicli collection delete my-api
 Data is stored in `~/.apicli/`:
 - `history.json` - Request history
 - `collections.json` - Saved collections
+- `aliases.json` - Endpoint aliases
 
 When using Docker, mount a volume to persist data:
 ```bash
@@ -132,6 +166,7 @@ docker-compose run --rm apicli <command>
 ├── cmd/                    # CLI commands (Cobra)
 │   ├── root.go            # Root command and global flags
 │   ├── request.go         # HTTP method commands
+│   ├── alias.go           # Endpoint alias management
 │   ├── collection.go      # Collection management
 │   └── history.go         # History commands
 ├── internal/              # Internal packages
