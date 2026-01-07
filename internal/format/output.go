@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
-	"github.com/vedsharma/apicli/internal/model"
+	"api/internal/model"
 )
 
 var (
@@ -218,4 +218,26 @@ func PrintSuccess(msg string) {
 // PrintError prints an error message
 func PrintError(msg string) {
 	clientErrColor.Printf("✗ %s\n", msg)
+}
+
+// PrintAliasList prints a list of aliases
+func PrintAliasList(aliases *model.Aliases) {
+	if len(aliases.Aliases) == 0 {
+		dimColor.Println("No aliases found")
+		return
+	}
+
+	fmt.Println("Aliases:")
+	for name, url := range aliases.Aliases {
+		headerKeyColor.Printf("  %s ", name)
+		dimColor.Print("→ ")
+		urlColor.Println(url)
+	}
+}
+
+// PrintAlias prints a single alias
+func PrintAlias(name, url string) {
+	headerKeyColor.Printf("%s ", name)
+	dimColor.Print("→ ")
+	urlColor.Println(url)
 }

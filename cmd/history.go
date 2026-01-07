@@ -6,8 +6,8 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
-	"github.com/vedsharma/apicli/internal/format"
-	"github.com/vedsharma/apicli/internal/storage"
+	"api/internal/format"
+	"api/internal/storage"
 )
 
 func init() {

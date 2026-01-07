@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vedsharma/apicli/internal/model"
+	"api/internal/model"
 )
 
 // Client wraps the standard http.Client with additional functionality

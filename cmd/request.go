@@ -8,10 +8,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
-	"github.com/vedsharma/apicli/internal/format"
-	httpclient "github.com/vedsharma/apicli/internal/http"
-	"github.com/vedsharma/apicli/internal/model"
-	"github.com/vedsharma/apicli/internal/storage"
+	"api/internal/format"
+	httpclient "api/internal/http"
+	"api/internal/model"
+	"api/internal/storage"
 )
 
 var (
@@ -84,6 +84,9 @@ func runRequest(method string) func(cmd *cobra.Command, args []string) {
 	return func(cmd *cobra.Command, args []string) {
 		url := args[0]
 		verbose, _ := cmd.Flags().GetBool("verbose")
+
+		// Resolve alias if present
+		url = resolveAlias(url)
 
 		// Parse headers
 		headerMap := parseHeaders(headers)
@@ -177,4 +180,47 @@ func saveRequestToCollection(collectionName, method, url string, headers map[str
 	}
 
 	format.PrintSuccess(fmt.Sprintf("Saved to collection '%s'", collectionName))
+}
+
+// resolveAlias resolves URL aliases to their full URLs.
+// If the URL starts with http:// or https://, it's returned as-is.
+// Otherwise, it checks if the first path segment is a known alias.
+func resolveAlias(url string) string {
+	// Skip if already a full URL
+	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+		return url
+	}
+
+	// Split on first / to get potential alias name and path
+	var aliasName, path string
+	if idx := strings.Index(url, "/"); idx != -1 {
+		aliasName = url[:idx]
+		path = url[idx+1:]
+	} else {
+		// No path component, the whole URL is potentially an alias
+		aliasName = url
+		path = ""
+	}
+
+	// Try to resolve the alias
+	store, err := storage.NewStorage()
+	if err != nil {
+		// Storage error, return URL as-is
+		return url
+	}
+
+	baseURL, exists, err := store.GetAlias(aliasName)
+	if err != nil || !exists {
+		// Alias not found or error, return URL as-is
+		return url
+	}
+
+	// Combine base URL with path (auto-normalize trailing slashes)
+	baseURL = strings.TrimSuffix(baseURL, "/")
+	path = strings.TrimPrefix(path, "/")
+
+	if path == "" {
+		return baseURL
+	}
+	return baseURL + "/" + path
 }

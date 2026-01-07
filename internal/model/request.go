@@ -48,3 +48,8 @@ type History struct {
 type Collections struct {
 	Collections map[string]Collection `json:"collections"`
 }
+
+// Aliases represents all URL aliases storage
+type Aliases struct {
+	Aliases map[string]string `json:"aliases"` // name -> base URL
+}

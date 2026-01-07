@@ -5,10 +5,10 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/vedsharma/apicli/internal/format"
-	httpclient "github.com/vedsharma/apicli/internal/http"
-	"github.com/vedsharma/apicli/internal/model"
-	"github.com/vedsharma/apicli/internal/storage"
+	"api/internal/format"
+	httpclient "api/internal/http"
+	"api/internal/model"
+	"api/internal/storage"
 )
 
 func init() {
@@ -203,13 +203,16 @@ func runCollectionRun(cmd *cobra.Command, args []string) {
 	fmt.Printf("Running %d requests from collection '%s'\n\n", len(col.Requests), name)
 
 	for i, req := range col.Requests {
+		// Resolve alias if present
+		resolvedURL := resolveAlias(req.URL)
+
 		if req.Name != "" {
 			fmt.Printf("[%d/%d] %s\n", i+1, len(col.Requests), req.Name)
 		} else {
-			fmt.Printf("[%d/%d] %s %s\n", i+1, len(col.Requests), req.Method, req.URL)
+			fmt.Printf("[%d/%d] %s %s\n", i+1, len(col.Requests), req.Method, resolvedURL)
 		}
 
-		resp, err := client.Do(req.Method, req.URL, req.Headers, req.Body)
+		resp, err := client.Do(req.Method, resolvedURL, req.Headers, req.Body)
 		if err != nil {
 			format.PrintError(fmt.Sprintf("Request failed: %v", err))
 			continue

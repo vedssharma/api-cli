@@ -5,12 +5,13 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/vedsharma/apicli/internal/model"
+	"api/internal/model"
 )
 
 const (
 	historyFile     = "history.json"
 	collectionsFile = "collections.json"
+	aliasesFile     = "aliases.json"
 )
 
 // Storage handles JSON file persistence
@@ -42,6 +43,11 @@ func (s *Storage) historyPath() string {
 // collectionsPath returns the path to the collections file
 func (s *Storage) collectionsPath() string {
 	return filepath.Join(s.dataDir, collectionsFile)
+}
+
+// aliasesPath returns the path to the aliases file
+func (s *Storage) aliasesPath() string {
+	return filepath.Join(s.dataDir, aliasesFile)
 }
 
 // LoadHistory loads the request history from disk
@@ -205,4 +211,68 @@ func (s *Storage) AddToCollection(collectionName string, req model.SavedRequest)
 	collections.Collections[collectionName] = col
 
 	return s.SaveCollections(collections)
+}
+
+// LoadAliases loads all aliases from disk
+func (s *Storage) LoadAliases() (*model.Aliases, error) {
+	aliases := &model.Aliases{Aliases: make(map[string]string)}
+
+	data, err := os.ReadFile(s.aliasesPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return aliases, nil
+		}
+		return nil, err
+	}
+
+	if err := json.Unmarshal(data, aliases); err != nil {
+		return nil, err
+	}
+
+	return aliases, nil
+}
+
+// SaveAliases saves all aliases to disk
+func (s *Storage) SaveAliases(aliases *model.Aliases) error {
+	data, err := json.MarshalIndent(aliases, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(s.aliasesPath(), data, 0644)
+}
+
+// CreateAlias creates a new alias
+func (s *Storage) CreateAlias(name, url string) error {
+	aliases, err := s.LoadAliases()
+	if err != nil {
+		return err
+	}
+
+	aliases.Aliases[name] = url
+
+	return s.SaveAliases(aliases)
+}
+
+// DeleteAlias deletes an alias
+func (s *Storage) DeleteAlias(name string) error {
+	aliases, err := s.LoadAliases()
+	if err != nil {
+		return err
+	}
+
+	delete(aliases.Aliases, name)
+
+	return s.SaveAliases(aliases)
+}
+
+// GetAlias gets an alias URL by name
+func (s *Storage) GetAlias(name string) (string, bool, error) {
+	aliases, err := s.LoadAliases()
+	if err != nil {
+		return "", false, err
+	}
+
+	url, exists := aliases.Aliases[name]
+	return url, exists, nil
 }
