@@ -12,6 +12,10 @@ const (
 	historyFile     = "history.json"
 	collectionsFile = "collections.json"
 	aliasesFile     = "aliases.json"
+
+	// Secure file permissions - owner read/write only
+	jsonSecureFileMode = 0600 // -rw-------
+	jsonSecureDirMode  = 0700 // drwx------
 )
 
 // JSONStorage handles JSON file persistence
@@ -28,7 +32,7 @@ func NewJSONStorage() (*JSONStorage, error) {
 	}
 
 	dataDir := filepath.Join(homeDir, ".apicli")
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, jsonSecureDirMode); err != nil {
 		return nil, err
 	}
 
@@ -76,7 +80,7 @@ func (s *JSONStorage) SaveHistory(history *model.History) error {
 		return err
 	}
 
-	return os.WriteFile(s.historyPath(), data, 0644)
+	return os.WriteFile(s.historyPath(), data, jsonSecureFileMode)
 }
 
 // AddToHistory adds a request to history
@@ -144,7 +148,7 @@ func (s *JSONStorage) SaveCollections(collections *model.Collections) error {
 		return err
 	}
 
-	return os.WriteFile(s.collectionsPath(), data, 0644)
+	return os.WriteFile(s.collectionsPath(), data, jsonSecureFileMode)
 }
 
 // CreateCollection creates a new collection
@@ -239,7 +243,7 @@ func (s *JSONStorage) SaveAliases(aliases *model.Aliases) error {
 		return err
 	}
 
-	return os.WriteFile(s.aliasesPath(), data, 0644)
+	return os.WriteFile(s.aliasesPath(), data, jsonSecureFileMode)
 }
 
 // CreateAlias creates a new alias

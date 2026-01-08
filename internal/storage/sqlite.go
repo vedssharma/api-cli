@@ -13,6 +13,10 @@ import (
 
 const (
 	dbFile = "apicli.db"
+
+	// Secure file permissions - owner read/write only
+	secureFileMode = 0600 // -rw-------
+	secureDirMode  = 0700 // drwx------
 )
 
 // SQLiteStorage handles SQLite database persistence
@@ -29,13 +33,19 @@ func NewStorage() (*SQLiteStorage, error) {
 	}
 
 	dataDir := filepath.Join(homeDir, ".apicli")
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, secureDirMode); err != nil {
 		return nil, err
 	}
 
 	dbPath := filepath.Join(dataDir, dbFile)
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
+		return nil, err
+	}
+
+	// Set secure permissions on database file
+	if err := os.Chmod(dbPath, secureFileMode); err != nil {
+		db.Close()
 		return nil, err
 	}
 

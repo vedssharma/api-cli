@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +14,19 @@ import (
 	"api/internal/model"
 	"api/internal/storage"
 )
+
+// sensitiveHeaders is a list of headers that should be redacted before storing in history
+var sensitiveHeaders = map[string]bool{
+	"authorization":       true,
+	"cookie":              true,
+	"set-cookie":          true,
+	"x-api-key":           true,
+	"api-key":             true,
+	"x-auth-token":        true,
+	"proxy-authorization": true,
+	"x-csrf-token":        true,
+	"x-xsrf-token":        true,
+}
 
 var (
 	headers     []string
@@ -95,12 +109,12 @@ func runRequest(method string) func(cmd *cobra.Command, args []string) {
 		body := data
 		if strings.HasPrefix(body, "@") {
 			filename := strings.TrimPrefix(body, "@")
-			content, err := os.ReadFile(filename)
+			content, err := readBodyFromFile(filename)
 			if err != nil {
 				format.PrintError(fmt.Sprintf("Failed to read file: %v", err))
 				os.Exit(1)
 			}
-			body = string(content)
+			body = content
 		}
 
 		// Create HTTP client and make request
@@ -146,14 +160,29 @@ func saveToHistory(method, url string, headers map[string]string, body string, r
 		return
 	}
 
+	// Filter sensitive headers before storing
+	filteredHeaders := filterSensitiveHeaders(headers)
+
+	// Filter sensitive response headers if present
+	var filteredResp *model.Response
+	if resp != nil {
+		filteredResp = &model.Response{
+			StatusCode: resp.StatusCode,
+			Status:     resp.Status,
+			Headers:    filterSensitiveHeaders(resp.Headers),
+			Body:       resp.Body,
+			DurationMs: resp.DurationMs,
+		}
+	}
+
 	req := model.Request{
 		ID:        uuid.New().String()[:8],
 		Timestamp: time.Now(),
 		Method:    method,
 		URL:       url,
-		Headers:   headers,
+		Headers:   filteredHeaders,
 		Body:      body,
-		Response:  resp,
+		Response:  filteredResp,
 	}
 
 	_ = store.AddToHistory(req)
@@ -223,4 +252,66 @@ func resolveAlias(url string) string {
 		return baseURL
 	}
 	return baseURL + "/" + path
+}
+
+// readBodyFromFile reads file content with path validation to prevent directory traversal
+func readBodyFromFile(filename string) (string, error) {
+	// Get working directory
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	// Get absolute path of the requested file
+	absPath, err := filepath.Abs(filename)
+	if err != nil {
+		return "", fmt.Errorf("invalid file path: %w", err)
+	}
+
+	// Clean the path to resolve any .. or . components
+	cleanPath := filepath.Clean(absPath)
+
+	// Ensure file is within working directory (prevent path traversal)
+	if !strings.HasPrefix(cleanPath, wd+string(filepath.Separator)) && cleanPath != wd {
+		return "", fmt.Errorf("access denied: file must be within current directory")
+	}
+
+	// Check for symlinks - resolve and verify target is also within working directory
+	realPath, err := filepath.EvalSymlinks(cleanPath)
+	if err != nil {
+		// If file doesn't exist, we'll let ReadFile handle the error
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("failed to resolve path: %w", err)
+		}
+		realPath = cleanPath
+	} else {
+		// Verify symlink target is also within working directory
+		if !strings.HasPrefix(realPath, wd+string(filepath.Separator)) && realPath != wd {
+			return "", fmt.Errorf("access denied: symlink target must be within current directory")
+		}
+	}
+
+	content, err := os.ReadFile(realPath)
+	if err != nil {
+		return "", err
+	}
+
+	return string(content), nil
+}
+
+// filterSensitiveHeaders returns a copy of headers with sensitive values redacted
+func filterSensitiveHeaders(headers map[string]string) map[string]string {
+	if headers == nil {
+		return nil
+	}
+
+	filtered := make(map[string]string)
+	for k, v := range headers {
+		if sensitiveHeaders[strings.ToLower(k)] {
+			filtered[k] = "[REDACTED]"
+		} else {
+			filtered[k] = v
+		}
+	}
+	return filtered
 }

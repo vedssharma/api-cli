@@ -1,8 +1,10 @@
 package http
 
 import (
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -25,6 +27,11 @@ func NewClient() *Client {
 
 // Do executes an HTTP request and returns the response
 func (c *Client) Do(method, url string, headers map[string]string, body string) (*model.Response, error) {
+	// Warn about insecure HTTP connections
+	if strings.HasPrefix(strings.ToLower(url), "http://") {
+		fmt.Fprintln(os.Stderr, "WARNING: Using insecure HTTP connection. Data will be transmitted unencrypted.")
+	}
+
 	var bodyReader io.Reader
 	if body != "" {
 		bodyReader = strings.NewReader(body)
