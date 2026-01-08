@@ -14,13 +14,13 @@ const (
 	aliasesFile     = "aliases.json"
 )
 
-// Storage handles JSON file persistence
-type Storage struct {
+// JSONStorage handles JSON file persistence
+type JSONStorage struct {
 	dataDir string
 }
 
-// NewStorage creates a new storage instance
-func NewStorage() (*Storage, error) {
+// NewJSONStorage creates a new JSON storage instance
+func NewJSONStorage() (*JSONStorage, error) {
 	// Use ~/.apicli as default data directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -32,26 +32,26 @@ func NewStorage() (*Storage, error) {
 		return nil, err
 	}
 
-	return &Storage{dataDir: dataDir}, nil
+	return &JSONStorage{dataDir: dataDir}, nil
 }
 
 // historyPath returns the path to the history file
-func (s *Storage) historyPath() string {
+func (s *JSONStorage) historyPath() string {
 	return filepath.Join(s.dataDir, historyFile)
 }
 
 // collectionsPath returns the path to the collections file
-func (s *Storage) collectionsPath() string {
+func (s *JSONStorage) collectionsPath() string {
 	return filepath.Join(s.dataDir, collectionsFile)
 }
 
 // aliasesPath returns the path to the aliases file
-func (s *Storage) aliasesPath() string {
+func (s *JSONStorage) aliasesPath() string {
 	return filepath.Join(s.dataDir, aliasesFile)
 }
 
 // LoadHistory loads the request history from disk
-func (s *Storage) LoadHistory() (*model.History, error) {
+func (s *JSONStorage) LoadHistory() (*model.History, error) {
 	history := &model.History{Requests: []model.Request{}}
 
 	data, err := os.ReadFile(s.historyPath())
@@ -70,7 +70,7 @@ func (s *Storage) LoadHistory() (*model.History, error) {
 }
 
 // SaveHistory saves the request history to disk
-func (s *Storage) SaveHistory(history *model.History) error {
+func (s *JSONStorage) SaveHistory(history *model.History) error {
 	data, err := json.MarshalIndent(history, "", "  ")
 	if err != nil {
 		return err
@@ -80,7 +80,7 @@ func (s *Storage) SaveHistory(history *model.History) error {
 }
 
 // AddToHistory adds a request to history
-func (s *Storage) AddToHistory(req model.Request) error {
+func (s *JSONStorage) AddToHistory(req model.Request) error {
 	history, err := s.LoadHistory()
 	if err != nil {
 		return err
@@ -98,12 +98,12 @@ func (s *Storage) AddToHistory(req model.Request) error {
 }
 
 // ClearHistory clears all history
-func (s *Storage) ClearHistory() error {
+func (s *JSONStorage) ClearHistory() error {
 	return s.SaveHistory(&model.History{Requests: []model.Request{}})
 }
 
 // GetHistoryRequest gets a specific request by ID
-func (s *Storage) GetHistoryRequest(id string) (*model.Request, error) {
+func (s *JSONStorage) GetHistoryRequest(id string) (*model.Request, error) {
 	history, err := s.LoadHistory()
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func (s *Storage) GetHistoryRequest(id string) (*model.Request, error) {
 }
 
 // LoadCollections loads all collections from disk
-func (s *Storage) LoadCollections() (*model.Collections, error) {
+func (s *JSONStorage) LoadCollections() (*model.Collections, error) {
 	collections := &model.Collections{Collections: make(map[string]model.Collection)}
 
 	data, err := os.ReadFile(s.collectionsPath())
@@ -138,7 +138,7 @@ func (s *Storage) LoadCollections() (*model.Collections, error) {
 }
 
 // SaveCollections saves all collections to disk
-func (s *Storage) SaveCollections(collections *model.Collections) error {
+func (s *JSONStorage) SaveCollections(collections *model.Collections) error {
 	data, err := json.MarshalIndent(collections, "", "  ")
 	if err != nil {
 		return err
@@ -148,7 +148,7 @@ func (s *Storage) SaveCollections(collections *model.Collections) error {
 }
 
 // CreateCollection creates a new collection
-func (s *Storage) CreateCollection(name string) error {
+func (s *JSONStorage) CreateCollection(name string) error {
 	collections, err := s.LoadCollections()
 	if err != nil {
 		return err
@@ -167,7 +167,7 @@ func (s *Storage) CreateCollection(name string) error {
 }
 
 // DeleteCollection deletes a collection
-func (s *Storage) DeleteCollection(name string) error {
+func (s *JSONStorage) DeleteCollection(name string) error {
 	collections, err := s.LoadCollections()
 	if err != nil {
 		return err
@@ -179,7 +179,7 @@ func (s *Storage) DeleteCollection(name string) error {
 }
 
 // GetCollection gets a collection by name
-func (s *Storage) GetCollection(name string) (*model.Collection, error) {
+func (s *JSONStorage) GetCollection(name string) (*model.Collection, error) {
 	collections, err := s.LoadCollections()
 	if err != nil {
 		return nil, err
@@ -193,7 +193,7 @@ func (s *Storage) GetCollection(name string) (*model.Collection, error) {
 }
 
 // AddToCollection adds a request to a collection
-func (s *Storage) AddToCollection(collectionName string, req model.SavedRequest) error {
+func (s *JSONStorage) AddToCollection(collectionName string, req model.SavedRequest) error {
 	collections, err := s.LoadCollections()
 	if err != nil {
 		return err
@@ -214,7 +214,7 @@ func (s *Storage) AddToCollection(collectionName string, req model.SavedRequest)
 }
 
 // LoadAliases loads all aliases from disk
-func (s *Storage) LoadAliases() (*model.Aliases, error) {
+func (s *JSONStorage) LoadAliases() (*model.Aliases, error) {
 	aliases := &model.Aliases{Aliases: make(map[string]string)}
 
 	data, err := os.ReadFile(s.aliasesPath())
@@ -233,7 +233,7 @@ func (s *Storage) LoadAliases() (*model.Aliases, error) {
 }
 
 // SaveAliases saves all aliases to disk
-func (s *Storage) SaveAliases(aliases *model.Aliases) error {
+func (s *JSONStorage) SaveAliases(aliases *model.Aliases) error {
 	data, err := json.MarshalIndent(aliases, "", "  ")
 	if err != nil {
 		return err
@@ -243,7 +243,7 @@ func (s *Storage) SaveAliases(aliases *model.Aliases) error {
 }
 
 // CreateAlias creates a new alias
-func (s *Storage) CreateAlias(name, url string) error {
+func (s *JSONStorage) CreateAlias(name, url string) error {
 	aliases, err := s.LoadAliases()
 	if err != nil {
 		return err
@@ -255,7 +255,7 @@ func (s *Storage) CreateAlias(name, url string) error {
 }
 
 // DeleteAlias deletes an alias
-func (s *Storage) DeleteAlias(name string) error {
+func (s *JSONStorage) DeleteAlias(name string) error {
 	aliases, err := s.LoadAliases()
 	if err != nil {
 		return err
@@ -267,7 +267,7 @@ func (s *Storage) DeleteAlias(name string) error {
 }
 
 // GetAlias gets an alias URL by name
-func (s *Storage) GetAlias(name string) (string, bool, error) {
+func (s *JSONStorage) GetAlias(name string) (string, bool, error) {
 	aliases, err := s.LoadAliases()
 	if err != nil {
 		return "", false, err
