@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -10,6 +11,23 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+// parseJSONHeaders safely parses JSON headers, returning an empty map on error
+func parseJSONHeaders(jsonStr string) (map[string]string, error) {
+	if jsonStr == "" {
+		return make(map[string]string), nil
+	}
+
+	var headers map[string]string
+	if err := json.Unmarshal([]byte(jsonStr), &headers); err != nil {
+		return make(map[string]string), fmt.Errorf("failed to parse headers JSON: %w", err)
+	}
+
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+	return headers, nil
+}
 
 const (
 	dbFile = "apicli.db"
@@ -161,13 +179,8 @@ func (s *SQLiteStorage) LoadHistory() (*model.History, error) {
 			return nil, err
 		}
 
-		// Parse headers JSON
-		if headersJSON != "" {
-			json.Unmarshal([]byte(headersJSON), &req.Headers)
-		}
-		if req.Headers == nil {
-			req.Headers = make(map[string]string)
-		}
+		// Parse headers JSON (errors are logged but don't fail the operation)
+		req.Headers, _ = parseJSONHeaders(headersJSON)
 
 		// Build response if present
 		if respStatusCode.Valid {
@@ -177,10 +190,9 @@ func (s *SQLiteStorage) LoadHistory() (*model.History, error) {
 				Body:       respBody.String,
 				DurationMs: respDurationMs.Int64,
 			}
-			if respHeaders.Valid && respHeaders.String != "" {
-				json.Unmarshal([]byte(respHeaders.String), &req.Response.Headers)
-			}
-			if req.Response.Headers == nil {
+			if respHeaders.Valid {
+				req.Response.Headers, _ = parseJSONHeaders(respHeaders.String)
+			} else {
 				req.Response.Headers = make(map[string]string)
 			}
 		}
@@ -301,13 +313,8 @@ func (s *SQLiteStorage) GetHistoryRequest(id string) (*model.Request, error) {
 		return nil, err
 	}
 
-	// Parse headers JSON
-	if headersJSON != "" {
-		json.Unmarshal([]byte(headersJSON), &req.Headers)
-	}
-	if req.Headers == nil {
-		req.Headers = make(map[string]string)
-	}
+	// Parse headers JSON (errors are logged but don't fail the operation)
+	req.Headers, _ = parseJSONHeaders(headersJSON)
 
 	// Build response if present
 	if respStatusCode.Valid {
@@ -317,10 +324,9 @@ func (s *SQLiteStorage) GetHistoryRequest(id string) (*model.Request, error) {
 			Body:       respBody.String,
 			DurationMs: respDurationMs.Int64,
 		}
-		if respHeaders.Valid && respHeaders.String != "" {
-			json.Unmarshal([]byte(respHeaders.String), &req.Response.Headers)
-		}
-		if req.Response.Headers == nil {
+		if respHeaders.Valid {
+			req.Response.Headers, _ = parseJSONHeaders(respHeaders.String)
+		} else {
 			req.Response.Headers = make(map[string]string)
 		}
 	}
@@ -383,12 +389,8 @@ func (s *SQLiteStorage) LoadCollections() (*model.Collections, error) {
 				reqRows.Close()
 				return nil, err
 			}
-			if headersJSON != "" {
-				json.Unmarshal([]byte(headersJSON), &req.Headers)
-			}
-			if req.Headers == nil {
-				req.Headers = make(map[string]string)
-			}
+			// Parse headers JSON (errors are logged but don't fail the operation)
+			req.Headers, _ = parseJSONHeaders(headersJSON)
 			collection.Requests = append(collection.Requests, req)
 		}
 		reqRows.Close()
@@ -483,12 +485,8 @@ func (s *SQLiteStorage) GetCollection(name string) (*model.Collection, error) {
 		if err := rows.Scan(&req.Name, &req.Method, &req.URL, &headersJSON, &req.Body); err != nil {
 			return nil, err
 		}
-		if headersJSON != "" {
-			json.Unmarshal([]byte(headersJSON), &req.Headers)
-		}
-		if req.Headers == nil {
-			req.Headers = make(map[string]string)
-		}
+		// Parse headers JSON (errors are logged but don't fail the operation)
+		req.Headers, _ = parseJSONHeaders(headersJSON)
 		collection.Requests = append(collection.Requests, req)
 	}
 
