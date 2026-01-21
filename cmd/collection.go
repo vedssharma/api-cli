@@ -150,6 +150,9 @@ func runCollectionAdd(cmd *cobra.Command, args []string) {
 
 	headerMap := parseHeaders(headers)
 
+	// Filter sensitive headers before storing in collection
+	filteredHeaders := filterSensitiveHeaders(headerMap)
+
 	store, err := storage.NewStorage()
 	if err != nil {
 		format.PrintError(fmt.Sprintf("Failed to add request: %v", err))
@@ -160,7 +163,7 @@ func runCollectionAdd(cmd *cobra.Command, args []string) {
 		Name:    requestName,
 		Method:  method,
 		URL:     url,
-		Headers: headerMap,
+		Headers: filteredHeaders,
 		Body:    data,
 	}
 

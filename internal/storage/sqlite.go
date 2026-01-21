@@ -37,6 +37,33 @@ const (
 	secureDirMode  = 0700 // drwx------
 )
 
+// ensureSecureFile creates a file with secure permissions if it doesn't exist,
+// or verifies/fixes permissions if it does exist. This prevents a TOCTOU race
+// condition where the file could be created with insecure default permissions.
+func ensureSecureFile(path string) error {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		// File doesn't exist - create it with secure permissions
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, secureFileMode)
+		if err != nil {
+			return fmt.Errorf("failed to create secure file: %w", err)
+		}
+		f.Close()
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	// File exists - check and fix permissions if needed
+	if info.Mode().Perm() != secureFileMode {
+		if err := os.Chmod(path, secureFileMode); err != nil {
+			return fmt.Errorf("failed to set secure permissions: %w", err)
+		}
+	}
+	return nil
+}
+
 // SQLiteStorage handles SQLite database persistence
 type SQLiteStorage struct {
 	db      *sql.DB
@@ -56,14 +83,16 @@ func NewStorage() (*SQLiteStorage, error) {
 	}
 
 	dbPath := filepath.Join(dataDir, dbFile)
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
+
+	// Create database file with secure permissions if it doesn't exist
+	// This avoids a race condition where the file is created with default
+	// permissions and then chmod'd afterward
+	if err := ensureSecureFile(dbPath); err != nil {
 		return nil, err
 	}
 
-	// Set secure permissions on database file
-	if err := os.Chmod(dbPath, secureFileMode); err != nil {
-		db.Close()
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
 		return nil, err
 	}
 

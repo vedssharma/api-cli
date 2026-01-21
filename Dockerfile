@@ -20,12 +20,17 @@ FROM alpine:latest
 
 RUN apk --no-cache add ca-certificates
 
-WORKDIR /root/
+# Create non-root user for security
+RUN adduser -D -u 1000 -h /home/appuser appuser
+
+# Switch to non-root user
+USER appuser
+WORKDIR /home/appuser
 
 # Copy the binary from builder
 COPY --from=builder /app/apicli .
 
-# Create data directory
-RUN mkdir -p /root/.apicli
+# Create data directory with correct ownership (already owned by appuser due to USER directive)
+RUN mkdir -p /home/appuser/.apicli
 
 ENTRYPOINT ["./apicli"]
