@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -11,6 +12,23 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// parseJSONHeaders safely parses JSON headers, returning an empty map on error
+func parseJSONHeaders(jsonStr string) (map[string]string, error) {
+	if jsonStr == "" {
+		return make(map[string]string), nil
+	}
+
+	var headers map[string]string
+	if err := json.Unmarshal([]byte(jsonStr), &headers); err != nil {
+		return make(map[string]string), fmt.Errorf("failed to parse headers JSON: %w", err)
+	}
+
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+	return headers, nil
+}
+
 const (
 	dbFile = "apicli.db"
 
@@ -18,6 +36,33 @@ const (
 	secureFileMode = 0600 // -rw-------
 	secureDirMode  = 0700 // drwx------
 )
+
+// ensureSecureFile creates a file with secure permissions if it doesn't exist,
+// or verifies/fixes permissions if it does exist. This prevents a TOCTOU race
+// condition where the file could be created with insecure default permissions.
+func ensureSecureFile(path string) error {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		// File doesn't exist - create it with secure permissions
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, secureFileMode)
+		if err != nil {
+			return fmt.Errorf("failed to create secure file: %w", err)
+		}
+		f.Close()
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	// File exists - check and fix permissions if needed
+	if info.Mode().Perm() != secureFileMode {
+		if err := os.Chmod(path, secureFileMode); err != nil {
+			return fmt.Errorf("failed to set secure permissions: %w", err)
+		}
+	}
+	return nil
+}
 
 // SQLiteStorage handles SQLite database persistence
 type SQLiteStorage struct {
@@ -38,14 +83,16 @@ func NewStorage() (*SQLiteStorage, error) {
 	}
 
 	dbPath := filepath.Join(dataDir, dbFile)
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
+
+	// Create database file with secure permissions if it doesn't exist
+	// This avoids a race condition where the file is created with default
+	// permissions and then chmod'd afterward
+	if err := ensureSecureFile(dbPath); err != nil {
 		return nil, err
 	}
 
-	// Set secure permissions on database file
-	if err := os.Chmod(dbPath, secureFileMode); err != nil {
-		db.Close()
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
 		return nil, err
 	}
 
@@ -161,13 +208,8 @@ func (s *SQLiteStorage) LoadHistory() (*model.History, error) {
 			return nil, err
 		}
 
-		// Parse headers JSON
-		if headersJSON != "" {
-			json.Unmarshal([]byte(headersJSON), &req.Headers)
-		}
-		if req.Headers == nil {
-			req.Headers = make(map[string]string)
-		}
+		// Parse headers JSON (errors are logged but don't fail the operation)
+		req.Headers, _ = parseJSONHeaders(headersJSON)
 
 		// Build response if present
 		if respStatusCode.Valid {
@@ -177,10 +219,9 @@ func (s *SQLiteStorage) LoadHistory() (*model.History, error) {
 				Body:       respBody.String,
 				DurationMs: respDurationMs.Int64,
 			}
-			if respHeaders.Valid && respHeaders.String != "" {
-				json.Unmarshal([]byte(respHeaders.String), &req.Response.Headers)
-			}
-			if req.Response.Headers == nil {
+			if respHeaders.Valid {
+				req.Response.Headers, _ = parseJSONHeaders(respHeaders.String)
+			} else {
 				req.Response.Headers = make(map[string]string)
 			}
 		}
@@ -301,13 +342,8 @@ func (s *SQLiteStorage) GetHistoryRequest(id string) (*model.Request, error) {
 		return nil, err
 	}
 
-	// Parse headers JSON
-	if headersJSON != "" {
-		json.Unmarshal([]byte(headersJSON), &req.Headers)
-	}
-	if req.Headers == nil {
-		req.Headers = make(map[string]string)
-	}
+	// Parse headers JSON (errors are logged but don't fail the operation)
+	req.Headers, _ = parseJSONHeaders(headersJSON)
 
 	// Build response if present
 	if respStatusCode.Valid {
@@ -317,10 +353,9 @@ func (s *SQLiteStorage) GetHistoryRequest(id string) (*model.Request, error) {
 			Body:       respBody.String,
 			DurationMs: respDurationMs.Int64,
 		}
-		if respHeaders.Valid && respHeaders.String != "" {
-			json.Unmarshal([]byte(respHeaders.String), &req.Response.Headers)
-		}
-		if req.Response.Headers == nil {
+		if respHeaders.Valid {
+			req.Response.Headers, _ = parseJSONHeaders(respHeaders.String)
+		} else {
 			req.Response.Headers = make(map[string]string)
 		}
 	}
@@ -383,12 +418,8 @@ func (s *SQLiteStorage) LoadCollections() (*model.Collections, error) {
 				reqRows.Close()
 				return nil, err
 			}
-			if headersJSON != "" {
-				json.Unmarshal([]byte(headersJSON), &req.Headers)
-			}
-			if req.Headers == nil {
-				req.Headers = make(map[string]string)
-			}
+			// Parse headers JSON (errors are logged but don't fail the operation)
+			req.Headers, _ = parseJSONHeaders(headersJSON)
 			collection.Requests = append(collection.Requests, req)
 		}
 		reqRows.Close()
@@ -483,12 +514,8 @@ func (s *SQLiteStorage) GetCollection(name string) (*model.Collection, error) {
 		if err := rows.Scan(&req.Name, &req.Method, &req.URL, &headersJSON, &req.Body); err != nil {
 			return nil, err
 		}
-		if headersJSON != "" {
-			json.Unmarshal([]byte(headersJSON), &req.Headers)
-		}
-		if req.Headers == nil {
-			req.Headers = make(map[string]string)
-		}
+		// Parse headers JSON (errors are logged but don't fail the operation)
+		req.Headers, _ = parseJSONHeaders(headersJSON)
 		collection.Requests = append(collection.Requests, req)
 	}
 

@@ -6,10 +6,39 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/fatih/color"
 	"api/internal/model"
 )
+
+// sanitizeOutput removes or escapes potentially dangerous control characters
+// that could manipulate terminal display or execute commands
+func sanitizeOutput(s string) string {
+	var result strings.Builder
+	result.Grow(len(s))
+
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			// Allow common whitespace characters
+			result.WriteRune(r)
+		case r == '\x1b':
+			// Escape ANSI escape sequences - replace ESC with visible representation
+			result.WriteString("\\x1b")
+		case unicode.IsControl(r) && r < 0x20:
+			// Replace other control characters (0x00-0x1F except allowed whitespace)
+			result.WriteString(fmt.Sprintf("\\x%02x", r))
+		case r == 0x7F:
+			// DEL character
+			result.WriteString("\\x7f")
+		default:
+			result.WriteRune(r)
+		}
+	}
+
+	return result.String()
+}
 
 var (
 	successColor = color.New(color.FgGreen, color.Bold)
@@ -41,7 +70,7 @@ func PrintResponse(resp *model.Response, showHeaders bool) {
 
 func printStatusLine(resp *model.Response) {
 	statusColor := getStatusColor(resp.StatusCode)
-	statusColor.Printf("%s\n", resp.Status)
+	statusColor.Printf("%s\n", sanitizeOutput(resp.Status))
 }
 
 func getStatusColor(code int) *color.Color {
@@ -72,8 +101,8 @@ func printHeaders(headers map[string]string) {
 	sort.Strings(keys)
 
 	for _, key := range keys {
-		headerKeyColor.Printf("  %s: ", key)
-		fmt.Println(headers[key])
+		headerKeyColor.Printf("  %s: ", sanitizeOutput(key))
+		fmt.Println(sanitizeOutput(headers[key]))
 	}
 	fmt.Println()
 }
@@ -84,9 +113,9 @@ func printBody(body string) {
 		return
 	}
 
-	// Try to pretty-print JSON
+	// Try to pretty-print JSON, then sanitize output for terminal safety
 	prettyBody := prettyJSON(body)
-	fmt.Println(prettyBody)
+	fmt.Println(sanitizeOutput(prettyBody))
 }
 
 func prettyJSON(s string) string {
@@ -102,14 +131,14 @@ func prettyJSON(s string) string {
 // PrintRequest prints a formatted HTTP request summary
 func PrintRequest(req *model.Request) {
 	methodColor.Printf("%s ", req.Method)
-	urlColor.Println(req.URL)
+	urlColor.Println(sanitizeOutput(req.URL))
 	dimColor.Printf("  ID: %s\n", req.ID)
 	dimColor.Printf("  Time: %s\n", req.Timestamp.Format("2006-01-02 15:04:05"))
 
 	if req.Response != nil {
 		fmt.Print("  Status: ")
 		statusColor := getStatusColor(req.Response.StatusCode)
-		statusColor.Println(req.Response.Status)
+		statusColor.Println(sanitizeOutput(req.Response.Status))
 	}
 }
 
@@ -118,7 +147,7 @@ func PrintRequestDetail(req *model.Request) {
 	fmt.Println("Request:")
 	fmt.Println(strings.Repeat("-", 40))
 	methodColor.Printf("%s ", req.Method)
-	urlColor.Println(req.URL)
+	urlColor.Println(sanitizeOutput(req.URL))
 	dimColor.Printf("ID: %s\n", req.ID)
 	dimColor.Printf("Time: %s\n\n", req.Timestamp.Format("2006-01-02 15:04:05"))
 
@@ -128,7 +157,7 @@ func PrintRequestDetail(req *model.Request) {
 
 	if req.Body != "" {
 		fmt.Println("Body:")
-		fmt.Println(prettyJSON(req.Body))
+		fmt.Println(sanitizeOutput(prettyJSON(req.Body)))
 		fmt.Println()
 	}
 
@@ -156,12 +185,12 @@ func PrintHistoryList(requests []model.Request, limit int) {
 		dimColor.Printf("[%d] ", i+1)
 		methodColor.Printf("%-7s ", req.Method)
 
-		// Truncate URL if too long
+		// Truncate URL if too long, then sanitize
 		url := req.URL
 		if len(url) > 60 {
 			url = url[:57] + "..."
 		}
-		urlColor.Printf("%-60s ", url)
+		urlColor.Printf("%-60s ", sanitizeOutput(url))
 
 		if req.Response != nil {
 			statusColor := getStatusColor(req.Response.StatusCode)
@@ -185,7 +214,7 @@ func PrintCollectionList(collections *model.Collections) {
 
 	fmt.Println("Collections:")
 	for name, col := range collections.Collections {
-		headerKeyColor.Printf("  %s ", name)
+		headerKeyColor.Printf("  %s ", sanitizeOutput(name))
 		dimColor.Printf("(%d requests)\n", len(col.Requests))
 	}
 }
@@ -193,20 +222,20 @@ func PrintCollectionList(collections *model.Collections) {
 // PrintCollectionRequests prints requests in a collection
 func PrintCollectionRequests(col *model.Collection) {
 	if len(col.Requests) == 0 {
-		dimColor.Printf("Collection '%s' is empty\n", col.Name)
+		dimColor.Printf("Collection '%s' is empty\n", sanitizeOutput(col.Name))
 		return
 	}
 
-	headerKeyColor.Printf("Collection: %s\n", col.Name)
+	headerKeyColor.Printf("Collection: %s\n", sanitizeOutput(col.Name))
 	fmt.Println(strings.Repeat("-", 40))
 
 	for i, req := range col.Requests {
 		dimColor.Printf("[%d] ", i+1)
 		if req.Name != "" {
-			fmt.Printf("%s: ", req.Name)
+			fmt.Printf("%s: ", sanitizeOutput(req.Name))
 		}
 		methodColor.Printf("%s ", req.Method)
-		urlColor.Println(req.URL)
+		urlColor.Println(sanitizeOutput(req.URL))
 	}
 }
 
@@ -229,15 +258,15 @@ func PrintAliasList(aliases *model.Aliases) {
 
 	fmt.Println("Aliases:")
 	for name, url := range aliases.Aliases {
-		headerKeyColor.Printf("  %s ", name)
+		headerKeyColor.Printf("  %s ", sanitizeOutput(name))
 		dimColor.Print("→ ")
-		urlColor.Println(url)
+		urlColor.Println(sanitizeOutput(url))
 	}
 }
 
 // PrintAlias prints a single alias
 func PrintAlias(name, url string) {
-	headerKeyColor.Printf("%s ", name)
+	headerKeyColor.Printf("%s ", sanitizeOutput(name))
 	dimColor.Print("→ ")
-	urlColor.Println(url)
+	urlColor.Println(sanitizeOutput(url))
 }

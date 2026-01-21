@@ -17,15 +17,41 @@ import (
 
 // sensitiveHeaders is a list of headers that should be redacted before storing in history
 var sensitiveHeaders = map[string]bool{
+	// Standard authentication headers
 	"authorization":       true,
-	"cookie":              true,
-	"set-cookie":          true,
-	"x-api-key":           true,
-	"api-key":             true,
-	"x-auth-token":        true,
 	"proxy-authorization": true,
-	"x-csrf-token":        true,
-	"x-xsrf-token":        true,
+	"www-authenticate":    true,
+
+	// Session and token headers
+	"cookie":       true,
+	"set-cookie":   true,
+	"x-api-key":    true,
+	"api-key":      true,
+	"x-auth-token": true,
+	"x-csrf-token": true,
+	"x-xsrf-token": true,
+
+	// AWS credentials
+	"x-amz-security-token": true,
+	"x-amz-credential":     true,
+	"x-amz-signature":      true,
+
+	// GCP credentials
+	"x-goog-authenticated-user-email": true,
+	"x-goog-authenticated-user-id":    true,
+	"x-goog-iap-jwt-assertion":        true,
+
+	// Azure credentials
+	"x-ms-client-principal":    true,
+	"x-ms-client-principal-id": true,
+	"x-ms-token-aad-id-token":  true,
+
+	// Other common auth headers
+	"x-access-token":  true,
+	"x-refresh-token": true,
+	"x-session-token": true,
+	"x-secret-key":    true,
+	"x-private-key":   true,
 }
 
 var (
@@ -115,6 +141,11 @@ func runRequest(method string) func(cmd *cobra.Command, args []string) {
 				os.Exit(1)
 			}
 			body = content
+		}
+
+		// Warn if body contains potentially sensitive data
+		if !noHistory {
+			warnIfSensitiveBody(body)
 		}
 
 		// Create HTTP client and make request
@@ -314,4 +345,31 @@ func filterSensitiveHeaders(headers map[string]string) map[string]string {
 		}
 	}
 	return filtered
+}
+
+// sensitiveBodyPatterns contains patterns that suggest sensitive data in request bodies
+var sensitiveBodyPatterns = []string{
+	"password", "passwd", "pwd",
+	"secret", "token", "api_key", "apikey",
+	"private_key", "privatekey",
+	"credit_card", "creditcard", "card_number",
+	"ssn", "social_security",
+	"access_token", "refresh_token",
+	"client_secret", "auth",
+}
+
+// warnIfSensitiveBody checks if the request body might contain sensitive data and warns the user
+func warnIfSensitiveBody(body string) {
+	if body == "" {
+		return
+	}
+
+	lowerBody := strings.ToLower(body)
+	for _, pattern := range sensitiveBodyPatterns {
+		if strings.Contains(lowerBody, pattern) {
+			fmt.Fprintln(os.Stderr, "WARNING: Request body may contain sensitive data (e.g., passwords, tokens). This will be stored in history.")
+			fmt.Fprintln(os.Stderr, "         Use --no-history flag to skip storing this request.")
+			return
+		}
+	}
 }
