@@ -31,6 +31,9 @@ type SavedRequest struct {
 	URL     string            `json:"url"`
 	Headers map[string]string `json:"headers"`
 	Body    string            `json:"body"`
+
+	// Assertions are checked against the response when the collection runs
+	Assertions []string `json:"assertions,omitempty"`
 }
 
 // Collection represents a group of saved requests

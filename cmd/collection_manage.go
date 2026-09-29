@@ -49,6 +49,9 @@ Example:
 	editCmd.Flags().StringArrayVarP(&headers, "header", "H", []string{}, "Add, replace or (with empty value) remove a header")
 	editCmd.Flags().StringVarP(&data, "data", "d", "", "New request body (use -d '' to clear)")
 
+	editCmd.Flags().StringArrayVar(&assertFlags, "assert", nil, "Replace the request's assertions (can be used multiple times)")
+	editCmd.Flags().Bool("clear-assert", false, "Remove all of the request's assertions")
+
 	collectionCmd.AddCommand(renameCmd, removeCmd, editCmd)
 }
 
@@ -118,8 +121,9 @@ func runCollectionEdit(cmd *cobra.Command, args []string) {
 
 	flags := cmd.Flags()
 	if !(flags.Changed("name") || flags.Changed("method") || flags.Changed("url") ||
-		flags.Changed("header") || flags.Changed("data")) {
-		format.PrintError("Nothing to change: pass --name, --method, --url, -H or -d")
+		flags.Changed("header") || flags.Changed("data") ||
+		flags.Changed("assert") || flags.Changed("clear-assert")) {
+		format.PrintError("Nothing to change: pass --name, --method, --url, -H, -d, --assert or --clear-assert")
 		os.Exit(1)
 	}
 
@@ -169,6 +173,13 @@ func runCollectionEdit(cmd *cobra.Command, args []string) {
 	}
 	if flags.Changed("data") {
 		req.Body = data
+	}
+	if flags.Changed("assert") {
+		exitOnErr(validateAssertions(assertFlags), "Invalid assertion")
+		req.Assertions = assertFlags
+	}
+	if clear, _ := flags.GetBool("clear-assert"); clear {
+		req.Assertions = nil
 	}
 
 	exitOnErr(store.UpdateInCollection(col.Name, idx, req), "Failed to edit request")

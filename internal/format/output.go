@@ -248,6 +248,9 @@ func PrintCollectionRequests(col *model.Collection) {
 		}
 		methodColor.Printf("%s ", req.Method)
 		urlColor.Println(sanitizeOutput(req.URL))
+		for _, a := range req.Assertions {
+			dimColor.Printf("      assert %s\n", sanitizeOutput(a))
+		}
 	}
 }
 

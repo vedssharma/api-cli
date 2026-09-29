@@ -186,8 +186,60 @@ func (s *SQLiteStorage) initSchema() error {
 	);
 	`
 
-	_, err := s.db.Exec(schema)
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	return s.addColumnIfMissing("saved_requests", "assertions", "TEXT DEFAULT '[]'")
+}
+
+// addColumnIfMissing adds a column to an existing table (for databases created
+// by an older version)
+func (s *SQLiteStorage) addColumnIfMissing(table, column, definition string) error {
+	rows, err := s.db.Query("SELECT name FROM pragma_table_info(?)", table)
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == column {
+			found = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
 	return err
+}
+
+// marshalAssertions encodes assertions for storage
+func marshalAssertions(a []string) string {
+	if len(a) == 0 {
+		return "[]"
+	}
+	b, _ := json.Marshal(a)
+	return string(b)
+}
+
+// unmarshalAssertions decodes stored assertions, ignoring malformed data
+func unmarshalAssertions(s string) []string {
+	if s == "" || s == "[]" {
+		return nil
+	}
+	var a []string
+	if err := json.Unmarshal([]byte(s), &a); err != nil {
+		return nil
+	}
+	return a
 }
 
 // =============================================================================
@@ -421,7 +473,7 @@ func (s *SQLiteStorage) LoadCollections() (*model.Collections, error) {
 		}
 
 		reqRows, err := s.db.Query(`
-			SELECT name, method, url, headers, body
+			SELECT name, method, url, headers, body, COALESCE(assertions, '[]')
 			FROM saved_requests
 			WHERE collection_id = ?
 			ORDER BY position`, col.id)
@@ -431,13 +483,14 @@ func (s *SQLiteStorage) LoadCollections() (*model.Collections, error) {
 
 		for reqRows.Next() {
 			var req model.SavedRequest
-			var headersJSON string
-			if err := reqRows.Scan(&req.Name, &req.Method, &req.URL, &headersJSON, &req.Body); err != nil {
+			var headersJSON, assertionsJSON string
+			if err := reqRows.Scan(&req.Name, &req.Method, &req.URL, &headersJSON, &req.Body, &assertionsJSON); err != nil {
 				reqRows.Close()
 				return nil, err
 			}
 			// Parse headers JSON (errors are logged but don't fail the operation)
 			req.Headers, _ = parseJSONHeaders(headersJSON)
+			req.Assertions = unmarshalAssertions(assertionsJSON)
 			collection.Requests = append(collection.Requests, req)
 		}
 		reqRows.Close()
@@ -476,9 +529,9 @@ func (s *SQLiteStorage) SaveCollections(collections *model.Collections) error {
 		for i, req := range col.Requests {
 			headersJSON, _ := json.Marshal(req.Headers)
 			_, err := tx.Exec(`
-				INSERT INTO saved_requests (collection_id, name, method, url, headers, body, position)
-				VALUES (?, ?, ?, ?, ?, ?, ?)`,
-				colID, req.Name, req.Method, req.URL, string(headersJSON), req.Body, i)
+				INSERT INTO saved_requests (collection_id, name, method, url, headers, body, assertions, position)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+				colID, req.Name, req.Method, req.URL, string(headersJSON), req.Body, marshalAssertions(req.Assertions), i)
 			if err != nil {
 				return err
 			}
@@ -517,7 +570,7 @@ func (s *SQLiteStorage) GetCollection(name string) (*model.Collection, error) {
 	}
 
 	rows, err := s.db.Query(`
-		SELECT name, method, url, headers, body
+		SELECT name, method, url, headers, body, COALESCE(assertions, '[]')
 		FROM saved_requests
 		WHERE collection_id = ?
 		ORDER BY position`, colID)
@@ -528,12 +581,13 @@ func (s *SQLiteStorage) GetCollection(name string) (*model.Collection, error) {
 
 	for rows.Next() {
 		var req model.SavedRequest
-		var headersJSON string
-		if err := rows.Scan(&req.Name, &req.Method, &req.URL, &headersJSON, &req.Body); err != nil {
+		var headersJSON, assertionsJSON string
+		if err := rows.Scan(&req.Name, &req.Method, &req.URL, &headersJSON, &req.Body, &assertionsJSON); err != nil {
 			return nil, err
 		}
 		// Parse headers JSON (errors are logged but don't fail the operation)
 		req.Headers, _ = parseJSONHeaders(headersJSON)
+		req.Assertions = unmarshalAssertions(assertionsJSON)
 		collection.Requests = append(collection.Requests, req)
 	}
 
@@ -616,9 +670,9 @@ func (s *SQLiteStorage) UpdateInCollection(collectionName string, index int, req
 	}
 	headersJSON, _ := json.Marshal(req.Headers)
 	if _, err := tx.Exec(`
-		UPDATE saved_requests SET name = ?, method = ?, url = ?, headers = ?, body = ?
+		UPDATE saved_requests SET name = ?, method = ?, url = ?, headers = ?, body = ?, assertions = ?
 		WHERE id = ?`,
-		req.Name, req.Method, req.URL, string(headersJSON), req.Body, id); err != nil {
+		req.Name, req.Method, req.URL, string(headersJSON), req.Body, marshalAssertions(req.Assertions), id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -656,9 +710,9 @@ func (s *SQLiteStorage) AddToCollection(collectionName string, req model.SavedRe
 	// Insert request
 	headersJSON, _ := json.Marshal(req.Headers)
 	_, err = tx.Exec(`
-		INSERT INTO saved_requests (collection_id, name, method, url, headers, body, position)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		colID, req.Name, req.Method, req.URL, string(headersJSON), req.Body, nextPos)
+		INSERT INTO saved_requests (collection_id, name, method, url, headers, body, assertions, position)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		colID, req.Name, req.Method, req.URL, string(headersJSON), req.Body, marshalAssertions(req.Assertions), nextPos)
 	if err != nil {
 		return err
 	}

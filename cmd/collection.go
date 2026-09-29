@@ -5,10 +5,17 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"api/internal/assert"
 	"api/internal/format"
+	httpclient "api/internal/http"
 	"api/internal/model"
 	"api/internal/storage"
 	"api/internal/vars"
+)
+
+var (
+	assertFlags []string
+	stopOnError bool
 )
 
 func init() {
@@ -57,6 +64,7 @@ Example:
 	}
 	addCmd.Flags().StringArrayVarP(&headers, "header", "H", []string{}, "Add header")
 	addCmd.Flags().StringVarP(&data, "data", "d", "", "Request body")
+	addCmd.Flags().StringArrayVar(&assertFlags, "assert", nil, "Assertion to check when the collection runs, e.g. status=200 (can be used multiple times)")
 
 	runCmd := &cobra.Command{
 		Use:   "run <name>",
@@ -66,6 +74,7 @@ Example:
 	}
 
 	runCmd.Flags().BoolVar(&failOnError, "fail", false, "Count responses with status 400 or higher as failures")
+	runCmd.Flags().BoolVar(&stopOnError, "stop-on-error", false, "Stop at the first failed request or assertion")
 	addConnectionFlags(runCmd)
 	addVariableFlags(runCmd)
 	collectionCmd.AddCommand(listCmd, createCmd, showCmd, deleteCmd, addCmd, runCmd)
@@ -157,6 +166,11 @@ func runCollectionAdd(cmd *cobra.Command, args []string) {
 	// Filter sensitive headers before storing in collection
 	filteredHeaders := filterSensitiveHeaders(headerMap)
 
+	if err := validateAssertions(assertFlags); err != nil {
+		format.PrintError(err.Error())
+		os.Exit(1)
+	}
+
 	store, err := storage.NewStorage()
 	if err != nil {
 		format.PrintError(fmt.Sprintf("Failed to add request: %v", err))
@@ -164,11 +178,12 @@ func runCollectionAdd(cmd *cobra.Command, args []string) {
 	}
 
 	req := model.SavedRequest{
-		Name:    requestName,
-		Method:  method,
-		URL:     url,
-		Headers: filteredHeaders,
-		Body:    data,
+		Name:       requestName,
+		Method:     method,
+		URL:        url,
+		Headers:    filteredHeaders,
+		Body:       data,
+		Assertions: assertFlags,
 	}
 
 	if err := store.AddToCollection(collectionName, req); err != nil {
@@ -222,41 +237,15 @@ func runCollectionRun(cmd *cobra.Command, args []string) {
 	}
 
 	for i, req := range col.Requests {
-		// Substitute {{variables}}, then resolve alias if present
-		resolver := vars.NewResolver(varMap)
-		resolvedURL := resolveAlias(resolver.String(req.URL))
-		reqHeaders := resolver.Map(req.Headers)
-		reqBody := resolver.String(req.Body)
-
-		if req.Name != "" {
-			fmt.Printf("[%d/%d] %s\n", i+1, len(col.Requests), req.Name)
-		} else {
-			fmt.Printf("[%d/%d] %s %s\n", i+1, len(col.Requests), req.Method, resolvedURL)
-		}
-
-		if err := resolver.Err(); err != nil {
-			format.PrintError(fmt.Sprintf("Skipping request: %v", err))
+		failed := runSavedRequest(client, req, i+1, len(col.Requests), varMap, verbose)
+		if failed {
 			failures++
-			continue
-		}
-
-		resp, err := client.Do(req.Method, resolvedURL, reqHeaders, reqBody)
-		if err != nil {
-			format.PrintError(fmt.Sprintf("Request failed: %v", err))
-			failures++
-			continue
-		}
-
-		format.PrintResponse(resp, verbose)
-		fmt.Println()
-
-		if err := captureFromResponse(resp, varMap, false); err != nil {
-			format.PrintError(err.Error())
-			failures++
-		}
-
-		if failOnError && resp.StatusCode >= 400 {
-			failures++
+			if stopOnError {
+				if remaining := len(col.Requests) - i - 1; remaining > 0 {
+					fmt.Printf("Stopping: skipped %d remaining request(s)\n\n", remaining)
+				}
+				break
+			}
 		}
 	}
 
@@ -266,4 +255,68 @@ func runCollectionRun(cmd *cobra.Command, args []string) {
 	}
 
 	format.PrintSuccess(fmt.Sprintf("Completed running collection '%s'", name))
+}
+
+// runSavedRequest sends one saved request, prints the result and checks its
+// assertions. It reports whether the request failed.
+func runSavedRequest(client *httpclient.Client, req model.SavedRequest, n, total int, varMap map[string]string, verbose bool) (failed bool) {
+	// Substitute {{variables}}, then resolve alias if present
+	resolver := vars.NewResolver(varMap)
+	resolvedURL := resolveAlias(resolver.String(req.URL))
+	reqHeaders := resolver.Map(req.Headers)
+	reqBody := resolver.String(req.Body)
+	assertions := resolveAll(req.Assertions, resolver.String)
+
+	if req.Name != "" {
+		fmt.Printf("[%d/%d] %s\n", n, total, req.Name)
+	} else {
+		fmt.Printf("[%d/%d] %s %s\n", n, total, req.Method, resolvedURL)
+	}
+
+	if err := resolver.Err(); err != nil {
+		format.PrintError(fmt.Sprintf("Skipping request: %v", err))
+		return true
+	}
+
+	resp, err := client.Do(req.Method, resolvedURL, reqHeaders, reqBody)
+	if err != nil {
+		format.PrintError(fmt.Sprintf("Request failed: %v", err))
+		return true
+	}
+
+	format.PrintResponse(resp, verbose)
+
+	if err := captureFromResponse(resp, varMap, false); err != nil {
+		format.PrintError(err.Error())
+		failed = true
+	}
+	if failOnError && resp.StatusCode >= 400 {
+		failed = true
+	}
+	for _, expr := range assertions {
+		a, err := assert.Parse(expr)
+		if err != nil {
+			format.PrintError(err.Error())
+			failed = true
+			continue
+		}
+		if ok, detail := a.Check(resp); ok {
+			format.PrintSuccess(fmt.Sprintf("assert %s", a.Raw))
+		} else {
+			format.PrintError(fmt.Sprintf("assert %s (%s)", a.Raw, detail))
+			failed = true
+		}
+	}
+	fmt.Println()
+	return failed
+}
+
+// validateAssertions checks that every assertion expression parses
+func validateAssertions(exprs []string) error {
+	for _, e := range exprs {
+		if _, err := assert.Parse(e); err != nil {
+			return err
+		}
+	}
+	return nil
 }
