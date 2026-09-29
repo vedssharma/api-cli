@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"api/internal/assert"
 	"api/internal/format"
 	httpclient "api/internal/http"
 	"api/internal/model"
 	"api/internal/storage"
 	"api/internal/vars"
+	"github.com/spf13/cobra"
 )
 
 var (

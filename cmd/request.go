@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/spf13/cobra"
 	"api/internal/curl"
 	"api/internal/format"
-	"api/internal/vars"
 	"api/internal/model"
 	"api/internal/storage"
+	"api/internal/vars"
+	"github.com/google/uuid"
+	"github.com/spf13/cobra"
 )
 
 // sensitiveHeaders is a list of headers that should be redacted before storing in history
@@ -56,15 +56,15 @@ var sensitiveHeaders = map[string]bool{
 }
 
 var (
-	headers     []string
-	data        string
-	noHistory   bool
+	headers          []string
+	data             string
+	noHistory        bool
 	saveToCollection string
-	rawOutput   bool
-	silent      bool
-	failOnError bool
-	outputFile  string
-	selectPath  string
+	rawOutput        bool
+	silent           bool
+	failOnError      bool
+	outputFile       string
+	selectPath       string
 )
 
 func init() {

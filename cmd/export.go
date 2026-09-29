@@ -34,10 +34,10 @@ type postmanItem struct {
 }
 
 type postmanRequest struct {
-	Method string         `json:"method"`
+	Method string          `json:"method"`
 	Header []postmanHeader `json:"header"`
-	URL    postmanURL     `json:"url"`
-	Body   *postmanBody   `json:"body,omitempty"`
+	URL    postmanURL      `json:"url"`
+	Body   *postmanBody    `json:"body,omitempty"`
 }
 
 type postmanHeader struct {
@@ -46,10 +46,10 @@ type postmanHeader struct {
 }
 
 type postmanURL struct {
-	Raw      string   `json:"raw"`
-	Protocol string   `json:"protocol"`
-	Host     []string `json:"host"`
-	Path     []string `json:"path"`
+	Raw      string              `json:"raw"`
+	Protocol string              `json:"protocol"`
+	Host     []string            `json:"host"`
+	Path     []string            `json:"path"`
 	Query    []postmanQueryParam `json:"query,omitempty"`
 }
 
@@ -59,9 +59,9 @@ type postmanQueryParam struct {
 }
 
 type postmanBody struct {
-	Mode    string            `json:"mode"`
-	Raw     string            `json:"raw"`
-	Options *postmanBodyOpts  `json:"options,omitempty"`
+	Mode    string           `json:"mode"`
+	Raw     string           `json:"raw"`
+	Options *postmanBodyOpts `json:"options,omitempty"`
 }
 
 type postmanBodyOpts struct {

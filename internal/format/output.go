@@ -8,8 +8,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/fatih/color"
 	"api/internal/model"
+	"github.com/fatih/color"
 )
 
 // sanitizeOutput removes or escapes potentially dangerous control characters
@@ -41,14 +41,14 @@ func sanitizeOutput(s string) string {
 }
 
 var (
-	successColor = color.New(color.FgGreen, color.Bold)
-	redirectColor = color.New(color.FgYellow, color.Bold)
+	successColor   = color.New(color.FgGreen, color.Bold)
+	redirectColor  = color.New(color.FgYellow, color.Bold)
 	clientErrColor = color.New(color.FgRed, color.Bold)
 	serverErrColor = color.New(color.FgRed, color.Bold, color.BgWhite)
 	headerKeyColor = color.New(color.FgCyan)
-	methodColor = color.New(color.FgMagenta, color.Bold)
-	urlColor = color.New(color.FgBlue)
-	dimColor = color.New(color.Faint)
+	methodColor    = color.New(color.FgMagenta, color.Bold)
+	urlColor       = color.New(color.FgBlue)
+	dimColor       = color.New(color.Faint)
 )
 
 // PrintResponse prints a formatted HTTP response

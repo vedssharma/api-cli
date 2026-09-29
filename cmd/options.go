@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	httpclient "api/internal/http"
 	"api/internal/vars"
+	"github.com/spf13/cobra"
 )
 
 var (

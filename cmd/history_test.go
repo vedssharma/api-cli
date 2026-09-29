@@ -121,10 +121,10 @@ func TestReplayRequest_DropsRedactedAndAppliesOverrides(t *testing.T) {
 
 func TestFilterSensitiveHeaders_KeepsPlaceholderValues(t *testing.T) {
 	in := map[string]string{
-		"Authorization": "Bearer {{token}}",
-		"X-Api-Key":     "{{key}}",
-		"Cookie":        "session={{sid}}", // literal text alongside the variable: redact
-		"X-Auth-Token":  "abc",
+		"Authorization":       "Bearer {{token}}",
+		"X-Api-Key":           "{{key}}",
+		"Cookie":              "session={{sid}}", // literal text alongside the variable: redact
+		"X-Auth-Token":        "abc",
 		"Proxy-Authorization": "Basic {{creds}}",
 	}
 	got := filterSensitiveHeaders(in)

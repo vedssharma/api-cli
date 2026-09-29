@@ -90,10 +90,10 @@ func TestFilterSensitiveHeaders_RedactsAuthorization(t *testing.T) {
 
 func TestFilterSensitiveHeaders_CaseInsensitive(t *testing.T) {
 	h := map[string]string{
-		"AUTHORIZATION":  "Bearer secret",
-		"X-API-KEY":      "my-key",
-		"x-auth-token":   "token-value",
-		"Cookie":         "session=abc",
+		"AUTHORIZATION": "Bearer secret",
+		"X-API-KEY":     "my-key",
+		"x-auth-token":  "token-value",
+		"Cookie":        "session=abc",
 	}
 	filtered := filterSensitiveHeaders(h)
 	for _, k := range []string{"AUTHORIZATION", "X-API-KEY", "x-auth-token", "Cookie"} {
@@ -127,10 +127,10 @@ func TestFilterSensitiveHeaders_AllSensitiveHeaders(t *testing.T) {
 
 func TestFilterSensitiveHeaders_SafeHeadersUnchanged(t *testing.T) {
 	h := map[string]string{
-		"Content-Type":    "application/json",
-		"Accept":          "*/*",
-		"X-Request-ID":    "abc-123",
-		"User-Agent":      "apicli/1.0",
+		"Content-Type": "application/json",
+		"Accept":       "*/*",
+		"X-Request-ID": "abc-123",
+		"User-Agent":   "apicli/1.0",
 	}
 	filtered := filterSensitiveHeaders(h)
 	for k, v := range h {

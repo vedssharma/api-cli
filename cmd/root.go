@@ -7,8 +7,8 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "apicli",
-	Short: "A CLI tool for making HTTP requests",
+	Use:     "apicli",
+	Short:   "A CLI tool for making HTTP requests",
 	Version: version,
 	Long: `apicli is a command-line HTTP client, similar to Postman.
 

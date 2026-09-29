@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"api/internal/storage"
+	"github.com/spf13/cobra"
 )
 
 // registerDynamicCompletions teaches the shell completion scripts (generated

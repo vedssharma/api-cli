@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"api/internal/format"
 	"api/internal/storage"
+	"github.com/spf13/cobra"
 )
 
 func init() {

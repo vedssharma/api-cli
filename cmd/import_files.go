@@ -7,12 +7,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"api/internal/format"
 	"api/internal/har"
 	"api/internal/model"
 	"api/internal/openapi"
 	"api/internal/vars"
+	"github.com/spf13/cobra"
 )
 
 // maxImportSize bounds the size of files read by the import commands

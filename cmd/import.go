@@ -18,8 +18,8 @@ import (
 // can be either leaf requests or folders containing more items.
 
 type postmanCollectionImport struct {
-	Info  postmanInfo            `json:"info"`
-	Items []postmanItemImport    `json:"item"`
+	Info  postmanInfo         `json:"info"`
+	Items []postmanItemImport `json:"item"`
 }
 
 type postmanItemImport struct {

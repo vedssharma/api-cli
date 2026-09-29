@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"api/internal/format"
 	"api/internal/model"
 	"api/internal/storage"
+	"github.com/spf13/cobra"
 )
 
 // registerCollectionManageCommands adds the rename, remove-request and edit subcommands

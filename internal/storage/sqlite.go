@@ -32,6 +32,12 @@ func parseJSONHeaders(jsonStr string) (map[string]string, error) {
 const (
 	dbFile = "apicli.db"
 
+	// Files written by versions that stored data as JSON. They are imported
+	// once into the database and renamed to *.migrated.
+	historyFile     = "history.json"
+	collectionsFile = "collections.json"
+	aliasesFile     = "aliases.json"
+
 	// Secure file permissions - owner read/write only
 	secureFileMode = 0600 // -rw-------
 	secureDirMode  = 0700 // drwx------
