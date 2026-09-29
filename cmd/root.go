@@ -26,6 +26,7 @@ var version = "dev"
 
 // Execute runs the root command
 func Execute() {
+	registerDynamicCompletions()
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
