@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"api/internal/format"
+	"api/internal/vars"
 	"api/internal/model"
 	"api/internal/storage"
 )
@@ -147,6 +148,7 @@ func addRequestFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&failOnError, "fail", false, "Exit with status 22 if the response status is 400 or higher")
 	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write the response body to a file")
 	addTransportFlags(cmd)
+	addVariableFlags(cmd)
 	cmd.Flags().StringVar(&selectPath, "select", "", "Print only the JSON value at a path, e.g. .data.items[0].name")
 }
 
@@ -155,38 +157,45 @@ func runRequest(method string) func(cmd *cobra.Command, args []string) {
 		url := args[0]
 		verbose, _ := cmd.Flags().GetBool("verbose")
 
-		// Resolve alias if present
-		url = resolveAlias(url)
-
-		// Parse headers
-		headerMap := parseHeaders(headers)
-
 		// Read body from file if prefixed with @
-		body := data
-		if strings.HasPrefix(body, "@") {
-			filename := strings.TrimPrefix(body, "@")
+		rawBody := data
+		if strings.HasPrefix(rawBody, "@") {
+			filename := strings.TrimPrefix(rawBody, "@")
 			content, err := readBodyFromFile(filename)
 			if err != nil {
 				format.PrintError(fmt.Sprintf("Failed to read file: %v", err))
 				os.Exit(1)
 			}
-			body = content
+			rawBody = content
 		}
 
-		// Apply query params, auth shortcuts and form/multipart bodies
-		var err error
-		if url, err = addQueryParams(url, queryParams); err != nil {
+		// Build the request twice: once keeping {{variables}} as written (what
+		// gets stored in history/collections, so variable values never leak
+		// there) and once with variables substituted (what gets sent).
+		stored, err := buildRequest(url, rawBody, identity)
+		if err != nil {
 			format.PrintError(err.Error())
 			os.Exit(1)
 		}
-		if body, err = applyAuthAndBody(headerMap, body); err != nil {
+
+		varMap, err := loadVariables()
+		if err != nil {
+			format.PrintError(err.Error())
+			os.Exit(1)
+		}
+		resolver := vars.NewResolver(varMap)
+		sent, err := buildRequest(url, rawBody, resolver.String)
+		if err == nil {
+			err = resolver.Err()
+		}
+		if err != nil {
 			format.PrintError(err.Error())
 			os.Exit(1)
 		}
 
 		// Warn if body contains potentially sensitive data
 		if !noHistory {
-			warnIfSensitiveBody(body)
+			warnIfSensitiveBody(stored.body)
 		}
 
 		// Create HTTP client and make request
@@ -195,10 +204,15 @@ func runRequest(method string) func(cmd *cobra.Command, args []string) {
 			format.PrintError(err.Error())
 			os.Exit(1)
 		}
-		resp, err := client.Do(method, url, headerMap, body)
+		resp, err := client.Do(method, sent.url, sent.headers, sent.body)
 		if err != nil {
 			format.PrintError(fmt.Sprintf("Request failed: %v", err))
 			os.Exit(1)
+		}
+
+		// Capture response values into variables
+		if err := captureFromResponse(resp, varMap, true); err != nil {
+			format.PrintError(err.Error())
 		}
 
 		// Print response
@@ -209,12 +223,12 @@ func runRequest(method string) func(cmd *cobra.Command, args []string) {
 
 		// Save to history unless disabled
 		if !noHistory {
-			saveToHistory(method, url, headerMap, body, resp)
+			saveToHistory(method, stored.url, stored.headers, stored.body, resp)
 		}
 
 		// Save to collection if specified
 		if saveToCollection != "" {
-			saveRequestToCollection(saveToCollection, method, url, headerMap, body)
+			saveRequestToCollection(saveToCollection, method, stored.url, stored.headers, stored.body)
 		}
 
 		if failOnError && resp.StatusCode >= 400 {
@@ -253,6 +267,29 @@ func outputResponse(resp *model.Response, verbose bool) error {
 		format.PrintResponse(resp, verbose)
 	}
 	return nil
+}
+
+type builtRequest struct {
+	url     string
+	headers map[string]string
+	body    string
+}
+
+func identity(s string) string { return s }
+
+// buildRequest assembles the final URL, headers and body from the request
+// flags, passing every user-supplied value through resolve.
+func buildRequest(rawURL, rawBody string, resolve func(string) string) (*builtRequest, error) {
+	u, err := addQueryParams(resolveAlias(resolve(rawURL)), resolveAll(queryParams, resolve))
+	if err != nil {
+		return nil, err
+	}
+	headerMap := parseHeaders(resolveAll(headers, resolve))
+	body, err := applyAuthAndBody(headerMap, resolve(rawBody), resolve)
+	if err != nil {
+		return nil, err
+	}
+	return &builtRequest{url: u, headers: headerMap, body: body}, nil
 }
 
 func parseHeaders(headerStrings []string) map[string]string {

@@ -166,6 +166,24 @@ func (s *SQLiteStorage) initSchema() error {
 		name TEXT PRIMARY KEY,
 		url TEXT NOT NULL
 	);
+
+	-- Environments (named sets of variables)
+	CREATE TABLE IF NOT EXISTS environments (
+		name TEXT PRIMARY KEY
+	);
+	CREATE TABLE IF NOT EXISTS env_vars (
+		env TEXT NOT NULL,
+		key TEXT NOT NULL,
+		value TEXT NOT NULL,
+		PRIMARY KEY (env, key),
+		FOREIGN KEY (env) REFERENCES environments(name) ON DELETE CASCADE
+	);
+
+	-- Simple key/value settings (e.g. the active environment)
+	CREATE TABLE IF NOT EXISTS settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	);
 	`
 
 	_, err := s.db.Exec(schema)

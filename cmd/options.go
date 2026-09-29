@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	httpclient "api/internal/http"
+	"api/internal/vars"
 )
 
 var (
@@ -67,38 +68,46 @@ func splitKeyValue(s string) (string, string, error) {
 	return s[:idx], s[idx+1:], nil
 }
 
-// addQueryParams appends key=value pairs to the URL's query string
+// addQueryParams appends key=value pairs to the URL's query string, keeping
+// their order. {{variable}} placeholders are left unescaped.
 func addQueryParams(rawURL string, params []string) (string, error) {
 	if len(params) == 0 {
 		return rawURL, nil
 	}
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "", fmt.Errorf("invalid URL: %w", err)
+	base, fragment := rawURL, ""
+	if i := strings.Index(base, "#"); i >= 0 {
+		base, fragment = base[:i], base[i:]
 	}
-	q := u.Query()
+	parts := make([]string, 0, len(params))
 	for _, p := range params {
 		k, v, err := splitKeyValue(p)
 		if err != nil {
 			return "", fmt.Errorf("--query: %w", err)
 		}
-		q.Add(k, v)
+		parts = append(parts, vars.MapSegments(k, url.QueryEscape)+"="+vars.MapSegments(v, url.QueryEscape))
 	}
-	u.RawQuery = q.Encode()
-	return u.String(), nil
+	sep := "?"
+	switch {
+	case strings.HasSuffix(base, "?") || strings.HasSuffix(base, "&"):
+		sep = ""
+	case strings.Contains(base, "?"):
+		sep = "&"
+	}
+	return base + sep + strings.Join(parts, "&") + fragment, nil
 }
 
-// buildFormBody encodes key=value pairs as application/x-www-form-urlencoded
+// buildFormBody encodes key=value pairs as application/x-www-form-urlencoded,
+// leaving {{variable}} placeholders unescaped
 func buildFormBody(fields []string) (string, error) {
-	values := url.Values{}
+	parts := make([]string, 0, len(fields))
 	for _, f := range fields {
 		k, v, err := splitKeyValue(f)
 		if err != nil {
 			return "", fmt.Errorf("--form: %w", err)
 		}
-		values.Add(k, v)
+		parts = append(parts, vars.MapSegments(k, url.QueryEscape)+"="+vars.MapSegments(v, url.QueryEscape))
 	}
-	return values.Encode(), nil
+	return strings.Join(parts, "&"), nil
 }
 
 // buildMultipartBody builds a multipart/form-data body. Values starting with
@@ -149,20 +158,31 @@ func hasHeader(headers map[string]string, name string) bool {
 	return false
 }
 
+// resolveAll applies resolve to every string in in
+func resolveAll(in []string, resolve func(string) string) []string {
+	out := make([]string, len(in))
+	for i, v := range in {
+		out[i] = resolve(v)
+	}
+	return out
+}
+
 // applyAuthAndBody applies --bearer/--basic and --form/--multipart to the
-// request. Headers given explicitly with -H are never overridden.
-func applyAuthAndBody(headers map[string]string, body string) (string, error) {
-	if bearerToken != "" && basicAuth != "" {
+// request, passing every user-supplied value through resolve. Headers given
+// explicitly with -H are never overridden.
+func applyAuthAndBody(headers map[string]string, body string, resolve func(string) string) (string, error) {
+	bearer, basic := resolve(bearerToken), resolve(basicAuth)
+	if bearer != "" && basic != "" {
 		return "", fmt.Errorf("--bearer and --basic cannot be used together")
 	}
-	if bearerToken != "" && !hasHeader(headers, "Authorization") {
-		headers["Authorization"] = "Bearer " + bearerToken
+	if bearer != "" && !hasHeader(headers, "Authorization") {
+		headers["Authorization"] = "Bearer " + bearer
 	}
-	if basicAuth != "" && !hasHeader(headers, "Authorization") {
-		if !strings.Contains(basicAuth, ":") {
+	if basic != "" && !hasHeader(headers, "Authorization") {
+		if !strings.Contains(basic, ":") {
 			return "", fmt.Errorf("--basic expects user:password")
 		}
-		headers["Authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(basicAuth))
+		headers["Authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(basic))
 	}
 
 	encodings := 0
@@ -176,7 +196,7 @@ func applyAuthAndBody(headers map[string]string, body string) (string, error) {
 	}
 
 	if len(formFields) > 0 {
-		encoded, err := buildFormBody(formFields)
+		encoded, err := buildFormBody(resolveAll(formFields, resolve))
 		if err != nil {
 			return "", err
 		}
@@ -186,7 +206,7 @@ func applyAuthAndBody(headers map[string]string, body string) (string, error) {
 		return encoded, nil
 	}
 	if len(multipartArgs) > 0 {
-		encoded, contentType, err := buildMultipartBody(multipartArgs)
+		encoded, contentType, err := buildMultipartBody(resolveAll(multipartArgs, resolve))
 		if err != nil {
 			return "", err
 		}

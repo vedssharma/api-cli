@@ -8,6 +8,7 @@ import (
 	"api/internal/format"
 	"api/internal/model"
 	"api/internal/storage"
+	"api/internal/vars"
 )
 
 func init() {
@@ -66,6 +67,7 @@ Example:
 
 	runCmd.Flags().BoolVar(&failOnError, "fail", false, "Count responses with status 400 or higher as failures")
 	addConnectionFlags(runCmd)
+	addVariableFlags(runCmd)
 	collectionCmd.AddCommand(listCmd, createCmd, showCmd, deleteCmd, addCmd, runCmd)
 	rootCmd.AddCommand(collectionCmd)
 }
@@ -212,9 +214,18 @@ func runCollectionRun(cmd *cobra.Command, args []string) {
 
 	failures := 0
 
+	varMap, err := loadVariables()
+	if err != nil {
+		format.PrintError(err.Error())
+		os.Exit(1)
+	}
+
 	for i, req := range col.Requests {
-		// Resolve alias if present
-		resolvedURL := resolveAlias(req.URL)
+		// Substitute {{variables}}, then resolve alias if present
+		resolver := vars.NewResolver(varMap)
+		resolvedURL := resolveAlias(resolver.String(req.URL))
+		reqHeaders := resolver.Map(req.Headers)
+		reqBody := resolver.String(req.Body)
 
 		if req.Name != "" {
 			fmt.Printf("[%d/%d] %s\n", i+1, len(col.Requests), req.Name)
@@ -222,7 +233,13 @@ func runCollectionRun(cmd *cobra.Command, args []string) {
 			fmt.Printf("[%d/%d] %s %s\n", i+1, len(col.Requests), req.Method, resolvedURL)
 		}
 
-		resp, err := client.Do(req.Method, resolvedURL, req.Headers, req.Body)
+		if err := resolver.Err(); err != nil {
+			format.PrintError(fmt.Sprintf("Skipping request: %v", err))
+			failures++
+			continue
+		}
+
+		resp, err := client.Do(req.Method, resolvedURL, reqHeaders, reqBody)
 		if err != nil {
 			format.PrintError(fmt.Sprintf("Request failed: %v", err))
 			failures++
@@ -231,6 +248,11 @@ func runCollectionRun(cmd *cobra.Command, args []string) {
 
 		format.PrintResponse(resp, verbose)
 		fmt.Println()
+
+		if err := captureFromResponse(resp, varMap, false); err != nil {
+			format.PrintError(err.Error())
+			failures++
+		}
 
 		if failOnError && resp.StatusCode >= 400 {
 			failures++

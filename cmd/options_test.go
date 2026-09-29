@@ -18,7 +18,7 @@ func TestAddQueryParams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "https://x.test/a?a=b+c&k=v&z=1" {
+	if got != "https://x.test/a?z=1&a=b+c&k=v" {
 		t.Errorf("got %s", got)
 	}
 	if _, err := addQueryParams("https://x.test", []string{"novalue"}); err == nil {
@@ -33,7 +33,7 @@ func TestApplyAuthAndBody_Bearer(t *testing.T) {
 	defer resetTransportFlags()
 	bearerToken = "tok"
 	h := map[string]string{}
-	if _, err := applyAuthAndBody(h, ""); err != nil {
+	if _, err := applyAuthAndBody(h, "", identity); err != nil {
 		t.Fatal(err)
 	}
 	if h["Authorization"] != "Bearer tok" {
@@ -45,7 +45,7 @@ func TestApplyAuthAndBody_ExplicitHeaderWins(t *testing.T) {
 	defer resetTransportFlags()
 	bearerToken = "tok"
 	h := map[string]string{"authorization": "Custom"}
-	if _, err := applyAuthAndBody(h, ""); err != nil {
+	if _, err := applyAuthAndBody(h, "", identity); err != nil {
 		t.Fatal(err)
 	}
 	if _, dup := h["Authorization"]; dup || h["authorization"] != "Custom" {
@@ -57,7 +57,7 @@ func TestApplyAuthAndBody_Basic(t *testing.T) {
 	defer resetTransportFlags()
 	basicAuth = "u:p"
 	h := map[string]string{}
-	if _, err := applyAuthAndBody(h, ""); err != nil {
+	if _, err := applyAuthAndBody(h, "", identity); err != nil {
 		t.Fatal(err)
 	}
 	want := "Basic " + base64.StdEncoding.EncodeToString([]byte("u:p"))
@@ -65,7 +65,7 @@ func TestApplyAuthAndBody_Basic(t *testing.T) {
 		t.Errorf("got %q", h["Authorization"])
 	}
 	basicAuth = "nocolon"
-	if _, err := applyAuthAndBody(map[string]string{}, ""); err == nil {
+	if _, err := applyAuthAndBody(map[string]string{}, "", identity); err == nil {
 		t.Error("expected error for basic auth without ':'")
 	}
 }
@@ -73,12 +73,12 @@ func TestApplyAuthAndBody_Basic(t *testing.T) {
 func TestApplyAuthAndBody_Conflicts(t *testing.T) {
 	defer resetTransportFlags()
 	bearerToken, basicAuth = "t", "u:p"
-	if _, err := applyAuthAndBody(map[string]string{}, ""); err == nil {
+	if _, err := applyAuthAndBody(map[string]string{}, "", identity); err == nil {
 		t.Error("expected bearer/basic conflict")
 	}
 	resetTransportFlags()
 	formFields = []string{"a=b"}
-	if _, err := applyAuthAndBody(map[string]string{}, "{}"); err == nil {
+	if _, err := applyAuthAndBody(map[string]string{}, "{}", identity); err == nil {
 		t.Error("expected data/form conflict")
 	}
 }
@@ -87,7 +87,7 @@ func TestApplyAuthAndBody_Form(t *testing.T) {
 	defer resetTransportFlags()
 	formFields = []string{"a=1", "b=x y"}
 	h := map[string]string{}
-	body, err := applyAuthAndBody(h, "")
+	body, err := applyAuthAndBody(h, "", identity)
 	if err != nil {
 		t.Fatal(err)
 	}
