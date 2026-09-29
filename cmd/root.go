@@ -9,6 +9,7 @@ import (
 var rootCmd = &cobra.Command{
 	Use:   "apicli",
 	Short: "A CLI tool for making HTTP requests",
+	Version: version,
 	Long: `apicli is a command-line HTTP client, similar to Postman.
 
 Send HTTP requests, track history, and organize requests into collections.
@@ -19,6 +20,9 @@ Examples:
   apicli history
   apicli collection list`,
 }
+
+// version is overridden at build time with -ldflags "-X api/cmd.version=..."
+var version = "dev"
 
 // Execute runs the root command
 func Execute() {

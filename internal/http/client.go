@@ -92,7 +92,8 @@ func (c *Client) Do(method, reqURL string, headers map[string]string, body strin
 	respHeaders := make(map[string]string)
 	for key, values := range resp.Header {
 		if len(values) > 0 {
-			respHeaders[key] = values[0]
+			// Join repeated headers (e.g. Set-Cookie) so no values are lost
+			respHeaders[key] = strings.Join(values, ", ")
 		}
 	}
 
@@ -103,6 +104,16 @@ func (c *Client) Do(method, reqURL string, headers map[string]string, body strin
 		Body:       string(respBody),
 		DurationMs: duration.Milliseconds(),
 	}, nil
+}
+
+// Head performs a HEAD request
+func (c *Client) Head(url string, headers map[string]string) (*model.Response, error) {
+	return c.Do("HEAD", url, headers, "")
+}
+
+// Options performs an OPTIONS request
+func (c *Client) Options(url string, headers map[string]string) (*model.Response, error) {
+	return c.Do("OPTIONS", url, headers, "")
 }
 
 // Get performs a GET request

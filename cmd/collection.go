@@ -65,6 +65,7 @@ Example:
 		Run:   runCollectionRun,
 	}
 
+	runCmd.Flags().BoolVar(&failOnError, "fail", false, "Count responses with status 400 or higher as failures")
 	collectionCmd.AddCommand(listCmd, createCmd, showCmd, deleteCmd, addCmd, runCmd)
 	rootCmd.AddCommand(collectionCmd)
 }
@@ -205,6 +206,8 @@ func runCollectionRun(cmd *cobra.Command, args []string) {
 
 	fmt.Printf("Running %d requests from collection '%s'\n\n", len(col.Requests), name)
 
+	failures := 0
+
 	for i, req := range col.Requests {
 		// Resolve alias if present
 		resolvedURL := resolveAlias(req.URL)
@@ -218,11 +221,21 @@ func runCollectionRun(cmd *cobra.Command, args []string) {
 		resp, err := client.Do(req.Method, resolvedURL, req.Headers, req.Body)
 		if err != nil {
 			format.PrintError(fmt.Sprintf("Request failed: %v", err))
+			failures++
 			continue
 		}
 
 		format.PrintResponse(resp, verbose)
 		fmt.Println()
+
+		if failOnError && resp.StatusCode >= 400 {
+			failures++
+		}
+	}
+
+	if failures > 0 {
+		format.PrintError(fmt.Sprintf("Completed collection '%s' with %d failed request(s)", name, failures))
+		os.Exit(1)
 	}
 
 	format.PrintSuccess(fmt.Sprintf("Completed running collection '%s'", name))

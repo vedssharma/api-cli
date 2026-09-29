@@ -59,6 +59,11 @@ var (
 	data        string
 	noHistory   bool
 	saveToCollection string
+	rawOutput   bool
+	silent      bool
+	failOnError bool
+	outputFile  string
+	selectPath  string
 )
 
 func init() {
@@ -102,6 +107,26 @@ func init() {
 	addRequestFlags(patchCmd)
 	rootCmd.AddCommand(patchCmd)
 
+	// HEAD command
+	headCmd := &cobra.Command{
+		Use:   "head <url>",
+		Short: "Send a HEAD request",
+		Args:  cobra.ExactArgs(1),
+		Run:   runRequest("HEAD"),
+	}
+	addRequestFlags(headCmd)
+	rootCmd.AddCommand(headCmd)
+
+	// OPTIONS command
+	optionsCmd := &cobra.Command{
+		Use:   "options <url>",
+		Short: "Send an OPTIONS request",
+		Args:  cobra.ExactArgs(1),
+		Run:   runRequest("OPTIONS"),
+	}
+	addRequestFlags(optionsCmd)
+	rootCmd.AddCommand(optionsCmd)
+
 	// DELETE command
 	deleteCmd := &cobra.Command{
 		Use:   "delete <url>",
@@ -118,6 +143,11 @@ func addRequestFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&data, "data", "d", "", "Request body (JSON string or @filename)")
 	cmd.Flags().BoolVar(&noHistory, "no-history", false, "Don't save to history")
 	cmd.Flags().StringVarP(&saveToCollection, "collection", "c", "", "Save to collection")
+	cmd.Flags().BoolVar(&rawOutput, "raw", false, "Print only the response body, unformatted")
+	cmd.Flags().BoolVarP(&silent, "silent", "s", false, "Suppress response output")
+	cmd.Flags().BoolVar(&failOnError, "fail", false, "Exit with status 22 if the response status is 400 or higher")
+	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write the response body to a file")
+	cmd.Flags().StringVar(&selectPath, "select", "", "Print only the JSON value at a path, e.g. .data.items[0].name")
 }
 
 func runRequest(method string) func(cmd *cobra.Command, args []string) {
@@ -157,7 +187,10 @@ func runRequest(method string) func(cmd *cobra.Command, args []string) {
 		}
 
 		// Print response
-		format.PrintResponse(resp, verbose)
+		if err := outputResponse(resp, verbose); err != nil {
+			format.PrintError(err.Error())
+			os.Exit(1)
+		}
 
 		// Save to history unless disabled
 		if !noHistory {
@@ -168,7 +201,43 @@ func runRequest(method string) func(cmd *cobra.Command, args []string) {
 		if saveToCollection != "" {
 			saveRequestToCollection(saveToCollection, method, url, headerMap, body)
 		}
+
+		if failOnError && resp.StatusCode >= 400 {
+			os.Exit(failExitCode)
+		}
 	}
+}
+
+// failExitCode is the exit status used by --fail, matching curl's --fail.
+const failExitCode = 22
+
+// outputResponse writes the response according to the output flags.
+func outputResponse(resp *model.Response, verbose bool) error {
+	body := resp.Body
+	if selectPath != "" {
+		selected, err := format.SelectJSON(body, selectPath)
+		if err != nil {
+			return fmt.Errorf("--select: %v", err)
+		}
+		body = selected
+	}
+
+	if outputFile != "" {
+		if err := os.WriteFile(outputFile, []byte(body), 0600); err != nil {
+			return fmt.Errorf("failed to write output file: %v", err)
+		}
+	}
+
+	switch {
+	case silent:
+	case outputFile != "":
+		format.PrintStatus(resp)
+	case rawOutput || selectPath != "":
+		format.PrintRawBody(body)
+	default:
+		format.PrintResponse(resp, verbose)
+	}
+	return nil
 }
 
 func parseHeaders(headerStrings []string) map[string]string {

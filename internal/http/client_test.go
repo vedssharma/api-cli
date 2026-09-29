@@ -434,3 +434,28 @@ func TestClient_StatusLine(t *testing.T) {
 		t.Errorf("expected Status to contain '401', got %q", resp.Status)
 	}
 }
+
+func TestClient_HeadOptionsAndMultiValueHeaders(t *testing.T) {
+	var methods []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		w.Header().Add("Set-Cookie", "a=1")
+		w.Header().Add("Set-Cookie", "b=2")
+	}))
+	defer srv.Close()
+
+	c := NewClient()
+	if _, err := c.Head(srv.URL, nil); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := c.Options(srv.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(methods) != 2 || methods[0] != "HEAD" || methods[1] != "OPTIONS" {
+		t.Errorf("unexpected methods: %v", methods)
+	}
+	if got := resp.Headers["Set-Cookie"]; got != "a=1, b=2" {
+		t.Errorf("Set-Cookie = %q, want both values", got)
+	}
+}

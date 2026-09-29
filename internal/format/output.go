@@ -68,6 +68,18 @@ func PrintResponse(resp *model.Response, showHeaders bool) {
 	printBody(resp.Body)
 }
 
+// PrintStatus prints only the status line and duration
+func PrintStatus(resp *model.Response) {
+	printStatusLine(resp)
+	dimColor.Printf("  Time: %dms\n", resp.DurationMs)
+}
+
+// PrintRawBody prints a body as-is (sanitized for the terminal) with no
+// status line, duration or JSON formatting.
+func PrintRawBody(body string) {
+	fmt.Println(sanitizeOutput(body))
+}
+
 func printStatusLine(resp *model.Response) {
 	statusColor := getStatusColor(resp.StatusCode)
 	statusColor.Printf("%s\n", sanitizeOutput(resp.Status))
