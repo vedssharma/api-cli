@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"api/internal/model"
 	"api/internal/storage"
 )
 
@@ -373,5 +375,58 @@ func TestReadBodyFromFile_EmptyFile(t *testing.T) {
 	}
 	if got != "" {
 		t.Errorf("expected empty content, got %q", got)
+	}
+}
+
+// captureStderr runs fn and returns what it wrote to os.Stderr
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+
+	fn()
+	w.Close()
+	out, _ := io.ReadAll(r)
+	return string(out)
+}
+
+// brokenHome points HOME at a regular file so storage cannot create ~/.apicli
+func brokenHome(t *testing.T) {
+	t.Helper()
+	f := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(f, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", f)
+	warnedStorage = map[string]bool{}
+}
+
+func TestResolveAlias_StorageErrorWarnsOnce(t *testing.T) {
+	brokenHome(t)
+	var got string
+	out := captureStderr(t, func() {
+		got = resolveAlias("myalias/users")
+		resolveAlias("myalias/users") // same failure again: no second warning
+	})
+	if got != "myalias/users" {
+		t.Errorf("URL should be returned unchanged, got %q", got)
+	}
+	if strings.Count(out, "WARNING: could not look up aliases") != 1 {
+		t.Errorf("expected exactly one warning, got %q", out)
+	}
+}
+
+func TestSaveToHistory_StorageErrorWarns(t *testing.T) {
+	brokenHome(t)
+	out := captureStderr(t, func() {
+		saveToHistory("GET", "http://x", nil, "", &model.Response{StatusCode: 200})
+	})
+	if !strings.Contains(out, "WARNING: could not save to history") {
+		t.Errorf("expected a history warning, got %q", out)
 	}
 }

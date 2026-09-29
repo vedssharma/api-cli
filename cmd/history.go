@@ -81,6 +81,7 @@ func runHistoryList(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to load history: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	history, err := store.LoadHistory()
 	if err != nil {
@@ -265,6 +266,7 @@ func runHistoryClear(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to clear history: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	if err := store.ClearHistory(); err != nil {
 		format.PrintError(fmt.Sprintf("Failed to clear history: %v", err))

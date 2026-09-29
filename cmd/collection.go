@@ -88,6 +88,7 @@ func runCollectionList(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to load collections: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	collections, err := store.LoadCollections()
 	if err != nil {
@@ -106,6 +107,7 @@ func runCollectionCreate(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to create collection: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	if err := store.CreateCollection(name); err != nil {
 		format.PrintError(fmt.Sprintf("Failed to create collection: %v", err))
@@ -123,6 +125,7 @@ func runCollectionShow(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to load collection: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	col, err := store.GetCollection(name)
 	if err != nil {
@@ -146,6 +149,7 @@ func runCollectionDelete(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to delete collection: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	if err := store.DeleteCollection(name); err != nil {
 		format.PrintError(fmt.Sprintf("Failed to delete collection: %v", err))
@@ -176,6 +180,7 @@ func runCollectionAdd(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to add request: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	req := model.SavedRequest{
 		Name:       requestName,
@@ -203,6 +208,7 @@ func runCollectionRun(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to load collection: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	col, err := store.GetCollection(name)
 	if err != nil {

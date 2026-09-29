@@ -113,6 +113,7 @@ func runExportPostman(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to open storage: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	var pc postmanCollection
 

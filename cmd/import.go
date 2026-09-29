@@ -110,6 +110,7 @@ func runImportPostman(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to open storage: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	// Create the collection (no-op if it already exists)
 	if err := store.CreateCollection(collectionName); err != nil {

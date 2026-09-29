@@ -328,9 +328,11 @@ func parseHeaders(headerStrings []string) map[string]string {
 func saveToHistory(method, url string, headers map[string]string, body string, resp *model.Response) {
 	store, err := storage.NewStorage()
 	if err != nil {
-		// Silently fail - don't interrupt the user
+		// Don't interrupt the user, but don't hide that history was lost either
+		warnStorage("could not save to history", err)
 		return
 	}
+	defer store.Close()
 
 	// Filter sensitive headers before storing
 	filteredHeaders := filterSensitiveHeaders(headers)
@@ -357,7 +359,21 @@ func saveToHistory(method, url string, headers map[string]string, body string, r
 		Response:  filteredResp,
 	}
 
-	_ = store.AddToHistory(req)
+	if err := store.AddToHistory(req); err != nil {
+		warnStorage("could not save to history", err)
+	}
+}
+
+var warnedStorage = map[string]bool{}
+
+// warnStorage prints a non-fatal storage problem to stderr, once per message
+func warnStorage(what string, err error) {
+	msg := fmt.Sprintf("%s: %v", what, err)
+	if warnedStorage[msg] {
+		return
+	}
+	warnedStorage[msg] = true
+	fmt.Fprintf(os.Stderr, "WARNING: %s\n", msg)
 }
 
 func saveRequestToCollection(collectionName, method, url string, headers map[string]string, body string) {
@@ -366,6 +382,7 @@ func saveRequestToCollection(collectionName, method, url string, headers map[str
 		format.PrintError(fmt.Sprintf("Failed to save to collection: %v", err))
 		return
 	}
+	defer store.Close()
 
 	req := model.SavedRequest{
 		Name:    "",
@@ -407,12 +424,18 @@ func resolveAlias(url string) string {
 	store, err := storage.NewStorage()
 	if err != nil {
 		// Storage error, return URL as-is
+		warnStorage("could not look up aliases", err)
 		return url
 	}
+	defer store.Close()
 
 	baseURL, exists, err := store.GetAlias(aliasName)
-	if err != nil || !exists {
-		// Alias not found or error, return URL as-is
+	if err != nil {
+		warnStorage("could not look up alias '"+aliasName+"'", err)
+		return url
+	}
+	if !exists {
+		// Not an alias, return URL as-is
 		return url
 	}
 
