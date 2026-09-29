@@ -66,6 +66,7 @@ Examples:
 	postmanImportCmd.Flags().StringP("collection", "c", "", "Target collection name (default: Postman collection name)")
 
 	importCmd.AddCommand(postmanImportCmd)
+	registerImportCurl(importCmd)
 	rootCmd.AddCommand(importCmd)
 }
 

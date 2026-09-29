@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+	"api/internal/curl"
 	"api/internal/format"
 	"api/internal/vars"
 	"api/internal/model"
@@ -143,6 +144,7 @@ func addRequestFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&data, "data", "d", "", "Request body (JSON string or @filename)")
 	cmd.Flags().BoolVar(&noHistory, "no-history", false, "Don't save to history")
 	cmd.Flags().StringVarP(&saveToCollection, "collection", "c", "", "Save to collection")
+	cmd.Flags().BoolVar(&printCurl, "curl", false, "Print the equivalent curl command instead of sending the request")
 	addTransportFlags(cmd)
 	addVariableFlags(cmd)
 	addOutputFlags(cmd)
@@ -196,6 +198,11 @@ func runRequest(method string) func(cmd *cobra.Command, args []string) {
 		if err != nil {
 			format.PrintError(err.Error())
 			os.Exit(1)
+		}
+
+		if printCurl {
+			fmt.Println(curl.Build(method, sent.url, sent.headers, sent.body))
+			return
 		}
 
 		sendAndReport(method, stored, sent, varMap, verbose)

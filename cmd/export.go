@@ -99,6 +99,7 @@ Examples:
 	postmanCmd.Flags().StringP("output", "o", "", "Output file path (default: stdout)")
 
 	exportCmd.AddCommand(postmanCmd)
+	registerExportCurl(exportCmd)
 	rootCmd.AddCommand(exportCmd)
 }
 
