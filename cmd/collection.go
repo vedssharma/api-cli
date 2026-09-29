@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"api/internal/format"
-	httpclient "api/internal/http"
 	"api/internal/model"
 	"api/internal/storage"
 )
@@ -66,6 +65,7 @@ Example:
 	}
 
 	runCmd.Flags().BoolVar(&failOnError, "fail", false, "Count responses with status 400 or higher as failures")
+	addConnectionFlags(runCmd)
 	collectionCmd.AddCommand(listCmd, createCmd, showCmd, deleteCmd, addCmd, runCmd)
 	rootCmd.AddCommand(collectionCmd)
 }
@@ -202,7 +202,11 @@ func runCollectionRun(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	client := httpclient.NewClient()
+	client, err := clientFromFlags()
+	if err != nil {
+		format.PrintError(err.Error())
+		os.Exit(1)
+	}
 
 	fmt.Printf("Running %d requests from collection '%s'\n\n", len(col.Requests), name)
 

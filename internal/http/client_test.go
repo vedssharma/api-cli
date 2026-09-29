@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ─── validateURL ────────────────────────────────────────────────────────────
@@ -457,5 +458,48 @@ func TestClient_HeadOptionsAndMultiValueHeaders(t *testing.T) {
 	}
 	if got := resp.Headers["Set-Cookie"]; got != "a=1, b=2" {
 		t.Errorf("Set-Cookie = %q, want both values", got)
+	}
+}
+
+func TestClient_NoFollowRedirect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/target" {
+			w.Write([]byte("final"))
+			return
+		}
+		http.Redirect(w, r, "/target", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c, _ := NewClientWithOptions(Options{NoFollowRedirect: true})
+	resp, err := c.Get(srv.URL+"/start", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusFound {
+		t.Errorf("status = %d, want 302", resp.StatusCode)
+	}
+
+	resp, err = NewClient().Get(srv.URL+"/start", nil)
+	if err != nil || resp.Body != "final" {
+		t.Errorf("default client should follow redirects: %v %v", resp, err)
+	}
+}
+
+func TestClient_Timeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+	}))
+	defer srv.Close()
+
+	c, _ := NewClientWithOptions(Options{Timeout: 50 * time.Millisecond})
+	if _, err := c.Get(srv.URL, nil); err == nil {
+		t.Error("expected timeout error")
+	}
+}
+
+func TestClient_InvalidProxy(t *testing.T) {
+	if _, err := NewClientWithOptions(Options{ProxyURL: "://bad"}); err == nil {
+		t.Error("expected error for invalid proxy URL")
 	}
 }

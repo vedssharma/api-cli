@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"api/internal/format"
-	httpclient "api/internal/http"
 	"api/internal/model"
 	"api/internal/storage"
 )
@@ -147,6 +146,7 @@ func addRequestFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVarP(&silent, "silent", "s", false, "Suppress response output")
 	cmd.Flags().BoolVar(&failOnError, "fail", false, "Exit with status 22 if the response status is 400 or higher")
 	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write the response body to a file")
+	addTransportFlags(cmd)
 	cmd.Flags().StringVar(&selectPath, "select", "", "Print only the JSON value at a path, e.g. .data.items[0].name")
 }
 
@@ -173,13 +173,28 @@ func runRequest(method string) func(cmd *cobra.Command, args []string) {
 			body = content
 		}
 
+		// Apply query params, auth shortcuts and form/multipart bodies
+		var err error
+		if url, err = addQueryParams(url, queryParams); err != nil {
+			format.PrintError(err.Error())
+			os.Exit(1)
+		}
+		if body, err = applyAuthAndBody(headerMap, body); err != nil {
+			format.PrintError(err.Error())
+			os.Exit(1)
+		}
+
 		// Warn if body contains potentially sensitive data
 		if !noHistory {
 			warnIfSensitiveBody(body)
 		}
 
 		// Create HTTP client and make request
-		client := httpclient.NewClient()
+		client, err := clientFromFlags()
+		if err != nil {
+			format.PrintError(err.Error())
+			os.Exit(1)
+		}
 		resp, err := client.Do(method, url, headerMap, body)
 		if err != nil {
 			format.PrintError(fmt.Sprintf("Request failed: %v", err))

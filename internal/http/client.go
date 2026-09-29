@@ -1,6 +1,7 @@
 package http
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,18 +21,52 @@ const (
 	DefaultTimeout = 30 * time.Second
 )
 
+// Options configures how a Client sends requests
+type Options struct {
+	Timeout          time.Duration // zero means DefaultTimeout
+	NoFollowRedirect bool          // return 3xx responses instead of following them
+	ProxyURL         string        // empty means use the environment's proxy settings
+	Insecure         bool          // skip TLS certificate verification
+}
+
 // Client wraps the standard http.Client with additional functionality
 type Client struct {
 	client *http.Client
 }
 
-// NewClient creates a new HTTP client
+// NewClient creates a new HTTP client with default options
 func NewClient() *Client {
-	return &Client{
-		client: &http.Client{
-			Timeout: DefaultTimeout,
-		},
+	c, _ := NewClientWithOptions(Options{})
+	return c
+}
+
+// NewClientWithOptions creates a new HTTP client configured by opts
+func NewClientWithOptions(opts Options) (*Client, error) {
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
 	}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if opts.ProxyURL != "" {
+		proxy, err := url.Parse(opts.ProxyURL)
+		if err != nil || proxy.Host == "" {
+			return nil, fmt.Errorf("invalid proxy URL: %q", opts.ProxyURL)
+		}
+		transport.Proxy = http.ProxyURL(proxy)
+	}
+	if opts.Insecure {
+		fmt.Fprintln(os.Stderr, "WARNING: TLS certificate verification is disabled (--insecure).")
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+
+	client := &http.Client{Timeout: timeout, Transport: transport}
+	if opts.NoFollowRedirect {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+	return &Client{client: client}, nil
 }
 
 // Do executes an HTTP request and returns the response
@@ -183,8 +218,8 @@ func validateURL(rawURL string) error {
 func isPrivateOrReservedHost(hostname string) bool {
 	// Check for common private IP patterns
 	privatePatterns := []string{
-		"10.",          // 10.0.0.0/8
-		"192.168.",     // 192.168.0.0/16
+		"10.",                                      // 10.0.0.0/8
+		"192.168.",                                 // 192.168.0.0/16
 		"172.16.", "172.17.", "172.18.", "172.19.", // 172.16.0.0/12
 		"172.20.", "172.21.", "172.22.", "172.23.",
 		"172.24.", "172.25.", "172.26.", "172.27.",
