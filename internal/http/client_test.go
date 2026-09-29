@@ -503,3 +503,81 @@ func TestClient_InvalidProxy(t *testing.T) {
 		t.Error("expected error for invalid proxy URL")
 	}
 }
+
+func TestIsPrivateOrReservedHost_IPv6AndHostnames(t *testing.T) {
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"fd00::1", true},          // unique local
+		{"fc00::1", true},          // unique local
+		{"fe80::1", true},          // link-local
+		{"[fd00::1]", true},        // bracketed
+		{"::ffff:10.0.0.1", true},  // IPv4-mapped private
+		{"2606:4700::1111", false}, // public
+		{"10.example.com", false},  // hostnames are not IPs
+		{"0.pool.ntp.org", false},
+		{"192.168.example.org", false},
+	}
+	for _, tt := range tests {
+		if got := isPrivateOrReservedHost(tt.host); got != tt.want {
+			t.Errorf("isPrivateOrReservedHost(%q) = %v, want %v", tt.host, got, tt.want)
+		}
+	}
+}
+
+func TestIsLoopbackHost(t *testing.T) {
+	for host, want := range map[string]bool{
+		"localhost": true, "LOCALHOST": true, "app.localhost": true, "127.0.0.1": true,
+		"127.1.2.3": true, "::1": true, "[::1]": true, "example.com": false, "10.0.0.1": false,
+		"notlocalhost": false,
+	} {
+		if got := isLoopbackHost(host); got != want {
+			t.Errorf("isLoopbackHost(%q) = %v, want %v", host, got, want)
+		}
+	}
+}
+
+func TestIsCloudMetadataEndpoint_IPv6Forms(t *testing.T) {
+	for host, want := range map[string]bool{
+		"fd00:ec2::254":             true,
+		"[fd00:ec2::254]":           true,
+		"::ffff:169.254.169.254":    true,
+		"metadata.google.internal.": true,
+		"fd00:ec2::255":             false,
+	} {
+		if got := isCloudMetadataEndpoint(host); got != want {
+			t.Errorf("isCloudMetadataEndpoint(%q) = %v, want %v", host, got, want)
+		}
+	}
+}
+
+func TestValidateURL_BlocksMappedMetadataAddress(t *testing.T) {
+	if err := validateURL("http://[::ffff:169.254.169.254]/latest"); err == nil {
+		t.Error("expected mapped IPv6 metadata address to be blocked")
+	}
+}
+
+func TestDialer_BlocksMetadataAddressEvenWithoutValidation(t *testing.T) {
+	// Bypass validateURL to prove the connection itself is refused
+	c := NewClient()
+	_, err := c.client.Get("http://169.254.169.254/latest/meta-data")
+	if err == nil || !strings.Contains(err.Error(), "blocked connection to cloud metadata endpoint") {
+		t.Errorf("expected dial-time block, got %v", err)
+	}
+}
+
+func TestBlockMetadataAddress(t *testing.T) {
+	if err := blockMetadataAddress("tcp", "169.254.169.254:80", nil); err == nil {
+		t.Error("metadata address should be blocked")
+	}
+	if err := blockMetadataAddress("tcp", "[fd00:ec2::254]:80", nil); err == nil {
+		t.Error("IPv6 metadata address should be blocked")
+	}
+	if err := blockMetadataAddress("tcp", "93.184.216.34:443", nil); err != nil {
+		t.Errorf("public address should be allowed: %v", err)
+	}
+	if err := blockMetadataAddress("tcp", "127.0.0.1:8080", nil); err != nil {
+		t.Errorf("loopback should be allowed: %v", err)
+	}
+}
