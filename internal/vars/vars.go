@@ -83,3 +83,13 @@ func MapSegments(s string, fn func(string) string) string {
 	b.WriteString(fn(s[last:]))
 	return b.String()
 }
+
+// StripPlaceholders removes every {{name}} placeholder from s and reports how
+// many were removed.
+func StripPlaceholders(s string) (rest string, count int) {
+	rest = placeholder.ReplaceAllStringFunc(s, func(string) string {
+		count++
+		return ""
+	})
+	return rest, count
+}

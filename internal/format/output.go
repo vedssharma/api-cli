@@ -193,28 +193,47 @@ func PrintHistoryList(requests []model.Request, limit int) {
 	}
 
 	for i := 0; i < count; i++ {
-		req := requests[i]
-		dimColor.Printf("[%d] ", i+1)
-		methodColor.Printf("%-7s ", req.Method)
-
-		// Truncate URL if too long, then sanitize
-		url := req.URL
-		if len(url) > 60 {
-			url = url[:57] + "..."
-		}
-		urlColor.Printf("%-60s ", sanitizeOutput(url))
-
-		if req.Response != nil {
-			statusColor := getStatusColor(req.Response.StatusCode)
-			statusColor.Printf("%d ", req.Response.StatusCode)
-			dimColor.Printf("(%dms)", req.Response.DurationMs)
-		}
-		fmt.Println()
+		printHistoryLine(i+1, requests[i])
 	}
 
 	if limit > 0 && len(requests) > limit {
 		dimColor.Printf("\n... and %d more requests\n", len(requests)-limit)
 	}
+}
+
+// PrintHistoryMatches prints the history entries at the given 0-based indexes,
+// keeping their original 1-based positions so they can be used with
+// 'history show' and 'history replay'.
+func PrintHistoryMatches(requests []model.Request, matches []int, limit int) {
+	count := len(matches)
+	if limit > 0 && limit < count {
+		count = limit
+	}
+	for _, idx := range matches[:count] {
+		printHistoryLine(idx+1, requests[idx])
+	}
+	if count < len(matches) {
+		dimColor.Printf("\n... and %d more matches\n", len(matches)-count)
+	}
+}
+
+func printHistoryLine(position int, req model.Request) {
+	dimColor.Printf("[%d] ", position)
+	methodColor.Printf("%-7s ", req.Method)
+
+	// Truncate URL if too long, then sanitize
+	url := req.URL
+	if len(url) > 60 {
+		url = url[:57] + "..."
+	}
+	urlColor.Printf("%-60s ", sanitizeOutput(url))
+
+	if req.Response != nil {
+		statusColor := getStatusColor(req.Response.StatusCode)
+		statusColor.Printf("%d ", req.Response.StatusCode)
+		dimColor.Printf("(%dms)", req.Response.DurationMs)
+	}
+	fmt.Println()
 }
 
 // PrintCollectionList prints a list of collections
