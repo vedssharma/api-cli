@@ -69,6 +69,7 @@ Example:
 	addConnectionFlags(runCmd)
 	addVariableFlags(runCmd)
 	collectionCmd.AddCommand(listCmd, createCmd, showCmd, deleteCmd, addCmd, runCmd)
+	registerCollectionManageCommands(collectionCmd)
 	rootCmd.AddCommand(collectionCmd)
 }
 

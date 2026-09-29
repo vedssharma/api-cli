@@ -540,6 +540,90 @@ func (s *SQLiteStorage) GetCollection(name string) (*model.Collection, error) {
 	return collection, rows.Err()
 }
 
+// RenameCollection renames a collection. It fails if oldName does not exist
+// or newName is already taken.
+func (s *SQLiteStorage) RenameCollection(oldName, newName string) error {
+	var n int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM collections WHERE name = ?", newName).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return fmt.Errorf("collection '%s' already exists", newName)
+	}
+	res, err := s.db.Exec("UPDATE collections SET name = ? WHERE name = ?", newName, oldName)
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return fmt.Errorf("collection '%s' not found", oldName)
+	}
+	return nil
+}
+
+// savedRequestRow finds a saved request by 0-based index within a collection
+func savedRequestRow(tx *sql.Tx, collectionName string, index int) (id, colID, position int64, err error) {
+	err = tx.QueryRow("SELECT id FROM collections WHERE name = ?", collectionName).Scan(&colID)
+	if err == sql.ErrNoRows {
+		return 0, 0, 0, fmt.Errorf("collection '%s' not found", collectionName)
+	}
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	err = tx.QueryRow(`
+		SELECT id, position FROM saved_requests
+		WHERE collection_id = ? ORDER BY position LIMIT 1 OFFSET ?`,
+		colID, index).Scan(&id, &position)
+	if err == sql.ErrNoRows || index < 0 {
+		return 0, 0, 0, fmt.Errorf("request %d not found in collection '%s'", index+1, collectionName)
+	}
+	return id, colID, position, err
+}
+
+// RemoveFromCollection deletes the request at the 0-based index and closes the gap
+func (s *SQLiteStorage) RemoveFromCollection(collectionName string, index int) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	id, colID, position, err := savedRequestRow(tx, collectionName, index)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM saved_requests WHERE id = ?", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		"UPDATE saved_requests SET position = position - 1 WHERE collection_id = ? AND position > ?",
+		colID, position); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpdateInCollection replaces the request at the 0-based index
+func (s *SQLiteStorage) UpdateInCollection(collectionName string, index int, req model.SavedRequest) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	id, _, _, err := savedRequestRow(tx, collectionName, index)
+	if err != nil {
+		return err
+	}
+	headersJSON, _ := json.Marshal(req.Headers)
+	if _, err := tx.Exec(`
+		UPDATE saved_requests SET name = ?, method = ?, url = ?, headers = ?, body = ?
+		WHERE id = ?`,
+		req.Name, req.Method, req.URL, string(headersJSON), req.Body, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // AddToCollection adds a request to a collection
 func (s *SQLiteStorage) AddToCollection(collectionName string, req model.SavedRequest) error {
 	tx, err := s.db.Begin()
