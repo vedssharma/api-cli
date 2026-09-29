@@ -711,3 +711,170 @@ func TestParseJSONHeaders_Invalid(t *testing.T) {
 		t.Error("expected non-nil map even on error")
 	}
 }
+
+// ─── Collection management ───────────────────────────────────────────────────
+
+func seedCollection(t *testing.T, s *SQLiteStorage) {
+	t.Helper()
+	for _, n := range []string{"a", "b", "c"} {
+		if err := s.AddToCollection("col", model.SavedRequest{Name: n, Method: "GET", URL: "http://x/" + n}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRenameCollection(t *testing.T) {
+	s := newTestStorage(t)
+	seedCollection(t, s)
+	s.CreateCollection("other")
+
+	if err := s.RenameCollection("col", "other"); err == nil {
+		t.Error("expected error renaming onto an existing collection")
+	}
+	if err := s.RenameCollection("missing", "new"); err == nil {
+		t.Error("expected error renaming a missing collection")
+	}
+	if err := s.RenameCollection("col", "renamed"); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := s.GetCollection("col"); c != nil {
+		t.Error("old name should be gone")
+	}
+	c, _ := s.GetCollection("renamed")
+	if c == nil || len(c.Requests) != 3 {
+		t.Errorf("requests should move with the collection: %+v", c)
+	}
+}
+
+func TestRemoveFromCollection(t *testing.T) {
+	s := newTestStorage(t)
+	seedCollection(t, s)
+
+	if err := s.RemoveFromCollection("col", 1); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := s.GetCollection("col")
+	if len(c.Requests) != 2 || c.Requests[0].Name != "a" || c.Requests[1].Name != "c" {
+		t.Fatalf("unexpected requests: %+v", c.Requests)
+	}
+
+	// Positions stay dense: a new request goes last and removal by index still works
+	s.AddToCollection("col", model.SavedRequest{Name: "d", Method: "GET", URL: "http://x/d"})
+	if err := s.RemoveFromCollection("col", 1); err != nil {
+		t.Fatal(err)
+	}
+	c, _ = s.GetCollection("col")
+	if len(c.Requests) != 2 || c.Requests[1].Name != "d" {
+		t.Errorf("unexpected requests: %+v", c.Requests)
+	}
+
+	if err := s.RemoveFromCollection("col", 5); err == nil {
+		t.Error("expected error for out-of-range index")
+	}
+	if err := s.RemoveFromCollection("col", -1); err == nil {
+		t.Error("expected error for negative index")
+	}
+	if err := s.RemoveFromCollection("missing", 0); err == nil {
+		t.Error("expected error for missing collection")
+	}
+}
+
+func TestUpdateInCollection(t *testing.T) {
+	s := newTestStorage(t)
+	seedCollection(t, s)
+
+	err := s.UpdateInCollection("col", 1, model.SavedRequest{
+		Name: "B2", Method: "POST", URL: "http://x/new", Headers: map[string]string{"A": "1"}, Body: "{}",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _ := s.GetCollection("col")
+	got := c.Requests[1]
+	if got.Name != "B2" || got.Method != "POST" || got.URL != "http://x/new" || got.Headers["A"] != "1" || got.Body != "{}" {
+		t.Errorf("update not applied: %+v", got)
+	}
+	if c.Requests[0].Name != "a" || c.Requests[2].Name != "c" {
+		t.Error("neighbouring requests changed")
+	}
+	if err := s.UpdateInCollection("col", 9, model.SavedRequest{}); err == nil {
+		t.Error("expected error for out-of-range index")
+	}
+}
+
+func TestAssertions_RoundTrip(t *testing.T) {
+	s := newTestStorage(t)
+	req := model.SavedRequest{Name: "r", Method: "GET", URL: "http://x", Assertions: []string{"status=200", `.a="b c"`}}
+	if err := s.AddToCollection("col", req); err != nil {
+		t.Fatal(err)
+	}
+	s.AddToCollection("col", model.SavedRequest{Name: "plain", Method: "GET", URL: "http://y"})
+
+	c, _ := s.GetCollection("col")
+	if len(c.Requests[0].Assertions) != 2 || c.Requests[0].Assertions[1] != `.a="b c"` {
+		t.Errorf("assertions lost: %+v", c.Requests[0])
+	}
+	if c.Requests[1].Assertions != nil {
+		t.Errorf("expected nil assertions, got %v", c.Requests[1].Assertions)
+	}
+
+	all, _ := s.LoadCollections()
+	if len(all.Collections["col"].Requests[0].Assertions) != 2 {
+		t.Error("LoadCollections lost assertions")
+	}
+
+	req.Assertions = []string{"status=201"}
+	if err := s.UpdateInCollection("col", 0, req); err != nil {
+		t.Fatal(err)
+	}
+	c, _ = s.GetCollection("col")
+	if len(c.Requests[0].Assertions) != 1 || c.Requests[0].Assertions[0] != "status=201" {
+		t.Errorf("update lost assertions: %v", c.Requests[0].Assertions)
+	}
+
+	if err := s.SaveCollections(all); err != nil {
+		t.Fatal(err)
+	}
+	c, _ = s.GetCollection("col")
+	if len(c.Requests[0].Assertions) != 2 {
+		t.Error("SaveCollections lost assertions")
+	}
+}
+
+func TestAssertionsColumn_MigratesOldDatabase(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Create a database with the previous schema (no assertions column)
+	s, err := NewStorage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		"DROP TABLE saved_requests",
+		`CREATE TABLE saved_requests (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, collection_id INTEGER NOT NULL,
+			name TEXT DEFAULT '', method TEXT NOT NULL, url TEXT NOT NULL,
+			headers TEXT DEFAULT '{}', body TEXT DEFAULT '', position INTEGER NOT NULL)`,
+		"INSERT INTO collections (name) VALUES ('old')",
+		"INSERT INTO saved_requests (collection_id, method, url, position) VALUES (1, 'GET', 'http://old', 0)",
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+
+	s2, err := NewStorage()
+	if err != nil {
+		t.Fatalf("reopen after old schema: %v", err)
+	}
+	defer s2.Close()
+	c, err := s2.GetCollection("old")
+	if err != nil || c == nil || len(c.Requests) != 1 || c.Requests[0].URL != "http://old" {
+		t.Fatalf("old data not readable: %+v %v", c, err)
+	}
+	if err := s2.AddToCollection("old", model.SavedRequest{Method: "GET", URL: "http://n", Assertions: []string{"status=200"}}); err != nil {
+		t.Fatal(err)
+	}
+}

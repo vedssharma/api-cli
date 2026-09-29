@@ -18,8 +18,8 @@ import (
 // can be either leaf requests or folders containing more items.
 
 type postmanCollectionImport struct {
-	Info  postmanInfo            `json:"info"`
-	Items []postmanItemImport    `json:"item"`
+	Info  postmanInfo         `json:"info"`
+	Items []postmanItemImport `json:"item"`
 }
 
 type postmanItemImport struct {
@@ -66,6 +66,8 @@ Examples:
 	postmanImportCmd.Flags().StringP("collection", "c", "", "Target collection name (default: Postman collection name)")
 
 	importCmd.AddCommand(postmanImportCmd)
+	registerImportCurl(importCmd)
+	registerImportFiles(importCmd)
 	rootCmd.AddCommand(importCmd)
 }
 
@@ -108,6 +110,7 @@ func runImportPostman(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to open storage: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	// Create the collection (no-op if it already exists)
 	if err := store.CreateCollection(collectionName); err != nil {

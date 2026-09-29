@@ -8,8 +8,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/fatih/color"
 	"api/internal/model"
+	"github.com/fatih/color"
 )
 
 // sanitizeOutput removes or escapes potentially dangerous control characters
@@ -41,14 +41,14 @@ func sanitizeOutput(s string) string {
 }
 
 var (
-	successColor = color.New(color.FgGreen, color.Bold)
-	redirectColor = color.New(color.FgYellow, color.Bold)
+	successColor   = color.New(color.FgGreen, color.Bold)
+	redirectColor  = color.New(color.FgYellow, color.Bold)
 	clientErrColor = color.New(color.FgRed, color.Bold)
 	serverErrColor = color.New(color.FgRed, color.Bold, color.BgWhite)
 	headerKeyColor = color.New(color.FgCyan)
-	methodColor = color.New(color.FgMagenta, color.Bold)
-	urlColor = color.New(color.FgBlue)
-	dimColor = color.New(color.Faint)
+	methodColor    = color.New(color.FgMagenta, color.Bold)
+	urlColor       = color.New(color.FgBlue)
+	dimColor       = color.New(color.Faint)
 )
 
 // PrintResponse prints a formatted HTTP response
@@ -66,6 +66,18 @@ func PrintResponse(resp *model.Response, showHeaders bool) {
 
 	// Print body
 	printBody(resp.Body)
+}
+
+// PrintStatus prints only the status line and duration
+func PrintStatus(resp *model.Response) {
+	printStatusLine(resp)
+	dimColor.Printf("  Time: %dms\n", resp.DurationMs)
+}
+
+// PrintRawBody prints a body as-is (sanitized for the terminal) with no
+// status line, duration or JSON formatting.
+func PrintRawBody(body string) {
+	fmt.Println(sanitizeOutput(body))
 }
 
 func printStatusLine(resp *model.Response) {
@@ -181,28 +193,47 @@ func PrintHistoryList(requests []model.Request, limit int) {
 	}
 
 	for i := 0; i < count; i++ {
-		req := requests[i]
-		dimColor.Printf("[%d] ", i+1)
-		methodColor.Printf("%-7s ", req.Method)
-
-		// Truncate URL if too long, then sanitize
-		url := req.URL
-		if len(url) > 60 {
-			url = url[:57] + "..."
-		}
-		urlColor.Printf("%-60s ", sanitizeOutput(url))
-
-		if req.Response != nil {
-			statusColor := getStatusColor(req.Response.StatusCode)
-			statusColor.Printf("%d ", req.Response.StatusCode)
-			dimColor.Printf("(%dms)", req.Response.DurationMs)
-		}
-		fmt.Println()
+		printHistoryLine(i+1, requests[i])
 	}
 
 	if limit > 0 && len(requests) > limit {
 		dimColor.Printf("\n... and %d more requests\n", len(requests)-limit)
 	}
+}
+
+// PrintHistoryMatches prints the history entries at the given 0-based indexes,
+// keeping their original 1-based positions so they can be used with
+// 'history show' and 'history replay'.
+func PrintHistoryMatches(requests []model.Request, matches []int, limit int) {
+	count := len(matches)
+	if limit > 0 && limit < count {
+		count = limit
+	}
+	for _, idx := range matches[:count] {
+		printHistoryLine(idx+1, requests[idx])
+	}
+	if count < len(matches) {
+		dimColor.Printf("\n... and %d more matches\n", len(matches)-count)
+	}
+}
+
+func printHistoryLine(position int, req model.Request) {
+	dimColor.Printf("[%d] ", position)
+	methodColor.Printf("%-7s ", req.Method)
+
+	// Truncate URL if too long, then sanitize
+	url := req.URL
+	if len(url) > 60 {
+		url = url[:57] + "..."
+	}
+	urlColor.Printf("%-60s ", sanitizeOutput(url))
+
+	if req.Response != nil {
+		statusColor := getStatusColor(req.Response.StatusCode)
+		statusColor.Printf("%d ", req.Response.StatusCode)
+		dimColor.Printf("(%dms)", req.Response.DurationMs)
+	}
+	fmt.Println()
 }
 
 // PrintCollectionList prints a list of collections
@@ -236,6 +267,9 @@ func PrintCollectionRequests(col *model.Collection) {
 		}
 		methodColor.Printf("%s ", req.Method)
 		urlColor.Println(sanitizeOutput(req.URL))
+		for _, a := range req.Assertions {
+			dimColor.Printf("      assert %s\n", sanitizeOutput(a))
+		}
 	}
 }
 

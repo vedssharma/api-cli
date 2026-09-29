@@ -3,17 +3,15 @@ FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
 
-# Install git for go mod download
-RUN apk add --no-cache git
+# Download dependencies first so this layer is cached until go.mod/go.sum change
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Copy source code first (needed for go mod tidy)
+# Build the binary from the committed, locked dependency set
 COPY . .
-
-# Download dependencies and generate go.sum
-RUN go mod tidy
-
-# Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o apicli .
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    -ldflags "-X api/cmd.version=${VERSION}" -o apicli .
 
 # Final stage
 FROM alpine:latest

@@ -7,12 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/spf13/cobra"
+	"api/internal/curl"
 	"api/internal/format"
-	httpclient "api/internal/http"
 	"api/internal/model"
 	"api/internal/storage"
+	"api/internal/vars"
+	"github.com/google/uuid"
+	"github.com/spf13/cobra"
 )
 
 // sensitiveHeaders is a list of headers that should be redacted before storing in history
@@ -55,10 +56,15 @@ var sensitiveHeaders = map[string]bool{
 }
 
 var (
-	headers     []string
-	data        string
-	noHistory   bool
+	headers          []string
+	data             string
+	noHistory        bool
 	saveToCollection string
+	rawOutput        bool
+	silent           bool
+	failOnError      bool
+	outputFile       string
+	selectPath       string
 )
 
 func init() {
@@ -102,6 +108,26 @@ func init() {
 	addRequestFlags(patchCmd)
 	rootCmd.AddCommand(patchCmd)
 
+	// HEAD command
+	headCmd := &cobra.Command{
+		Use:   "head <url>",
+		Short: "Send a HEAD request",
+		Args:  cobra.ExactArgs(1),
+		Run:   runRequest("HEAD"),
+	}
+	addRequestFlags(headCmd)
+	rootCmd.AddCommand(headCmd)
+
+	// OPTIONS command
+	optionsCmd := &cobra.Command{
+		Use:   "options <url>",
+		Short: "Send an OPTIONS request",
+		Args:  cobra.ExactArgs(1),
+		Run:   runRequest("OPTIONS"),
+	}
+	addRequestFlags(optionsCmd)
+	rootCmd.AddCommand(optionsCmd)
+
 	// DELETE command
 	deleteCmd := &cobra.Command{
 		Use:   "delete <url>",
@@ -118,6 +144,19 @@ func addRequestFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&data, "data", "d", "", "Request body (JSON string or @filename)")
 	cmd.Flags().BoolVar(&noHistory, "no-history", false, "Don't save to history")
 	cmd.Flags().StringVarP(&saveToCollection, "collection", "c", "", "Save to collection")
+	cmd.Flags().BoolVar(&printCurl, "curl", false, "Print the equivalent curl command instead of sending the request")
+	addTransportFlags(cmd)
+	addVariableFlags(cmd)
+	addOutputFlags(cmd)
+}
+
+// addOutputFlags registers the flags controlling how the response is printed
+func addOutputFlags(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&rawOutput, "raw", false, "Print only the response body, unformatted")
+	cmd.Flags().BoolVarP(&silent, "silent", "s", false, "Suppress response output")
+	cmd.Flags().BoolVar(&failOnError, "fail", false, "Exit with status 22 if the response status is 400 or higher")
+	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write the response body to a file")
+	cmd.Flags().StringVar(&selectPath, "select", "", "Print only the JSON value at a path, e.g. .data.items[0].name")
 }
 
 func runRequest(method string) func(cmd *cobra.Command, args []string) {
@@ -125,50 +164,152 @@ func runRequest(method string) func(cmd *cobra.Command, args []string) {
 		url := args[0]
 		verbose, _ := cmd.Flags().GetBool("verbose")
 
-		// Resolve alias if present
-		url = resolveAlias(url)
-
-		// Parse headers
-		headerMap := parseHeaders(headers)
-
 		// Read body from file if prefixed with @
-		body := data
-		if strings.HasPrefix(body, "@") {
-			filename := strings.TrimPrefix(body, "@")
+		rawBody := data
+		if strings.HasPrefix(rawBody, "@") {
+			filename := strings.TrimPrefix(rawBody, "@")
 			content, err := readBodyFromFile(filename)
 			if err != nil {
 				format.PrintError(fmt.Sprintf("Failed to read file: %v", err))
 				os.Exit(1)
 			}
-			body = content
+			rawBody = content
 		}
 
-		// Warn if body contains potentially sensitive data
-		if !noHistory {
-			warnIfSensitiveBody(body)
-		}
-
-		// Create HTTP client and make request
-		client := httpclient.NewClient()
-		resp, err := client.Do(method, url, headerMap, body)
+		// Build the request twice: once keeping {{variables}} as written (what
+		// gets stored in history/collections, so variable values never leak
+		// there) and once with variables substituted (what gets sent).
+		stored, err := buildRequest(url, rawBody, identity)
 		if err != nil {
-			format.PrintError(fmt.Sprintf("Request failed: %v", err))
+			format.PrintError(err.Error())
 			os.Exit(1)
 		}
 
-		// Print response
-		format.PrintResponse(resp, verbose)
-
-		// Save to history unless disabled
-		if !noHistory {
-			saveToHistory(method, url, headerMap, body, resp)
+		varMap, err := loadVariables()
+		if err != nil {
+			format.PrintError(err.Error())
+			os.Exit(1)
+		}
+		resolver := vars.NewResolver(varMap)
+		sent, err := buildRequest(url, rawBody, resolver.String)
+		if err == nil {
+			err = resolver.Err()
+		}
+		if err != nil {
+			format.PrintError(err.Error())
+			os.Exit(1)
 		}
 
-		// Save to collection if specified
-		if saveToCollection != "" {
-			saveRequestToCollection(saveToCollection, method, url, headerMap, body)
+		if printCurl {
+			fmt.Println(curl.Build(method, sent.url, sent.headers, sent.body))
+			return
+		}
+
+		sendAndReport(method, stored, sent, varMap, verbose)
+	}
+}
+
+// sendAndReport sends the request, prints the response and records it in
+// history and/or a collection according to the flags. stored holds the
+// request with {{variables}} unsubstituted (what gets recorded); sent is what
+// goes over the wire. It exits non-zero on failure.
+func sendAndReport(method string, stored, sent *builtRequest, varMap map[string]string, verbose bool) {
+	// Warn if body contains potentially sensitive data
+	if !noHistory {
+		warnIfSensitiveBody(stored.body)
+	}
+
+	// Create HTTP client and make request
+	client, err := clientFromFlags()
+	if err != nil {
+		format.PrintError(err.Error())
+		os.Exit(1)
+	}
+	resp, err := client.Do(method, sent.url, sent.headers, sent.body)
+	if err != nil {
+		format.PrintError(fmt.Sprintf("Request failed: %v", err))
+		os.Exit(1)
+	}
+
+	// Capture response values into variables
+	if err := captureFromResponse(resp, varMap, true); err != nil {
+		format.PrintError(err.Error())
+	}
+
+	// Print response
+	if err := outputResponse(resp, verbose); err != nil {
+		format.PrintError(err.Error())
+		os.Exit(1)
+	}
+
+	// Save to history unless disabled
+	if !noHistory {
+		saveToHistory(method, stored.url, stored.headers, stored.body, resp)
+	}
+
+	// Save to collection if specified
+	if saveToCollection != "" {
+		saveRequestToCollection(saveToCollection, method, stored.url, stored.headers, stored.body)
+	}
+
+	if failOnError && resp.StatusCode >= 400 {
+		os.Exit(failExitCode)
+	}
+}
+
+// failExitCode is the exit status used by --fail, matching curl's --fail.
+const failExitCode = 22
+
+// outputResponse writes the response according to the output flags.
+func outputResponse(resp *model.Response, verbose bool) error {
+	body := resp.Body
+	if selectPath != "" {
+		selected, err := format.SelectJSON(body, selectPath)
+		if err != nil {
+			return fmt.Errorf("--select: %v", err)
+		}
+		body = selected
+	}
+
+	if outputFile != "" {
+		if err := os.WriteFile(outputFile, []byte(body), 0600); err != nil {
+			return fmt.Errorf("failed to write output file: %v", err)
 		}
 	}
+
+	switch {
+	case silent:
+	case outputFile != "":
+		format.PrintStatus(resp)
+	case rawOutput || selectPath != "":
+		format.PrintRawBody(body)
+	default:
+		format.PrintResponse(resp, verbose)
+	}
+	return nil
+}
+
+type builtRequest struct {
+	url     string
+	headers map[string]string
+	body    string
+}
+
+func identity(s string) string { return s }
+
+// buildRequest assembles the final URL, headers and body from the request
+// flags, passing every user-supplied value through resolve.
+func buildRequest(rawURL, rawBody string, resolve func(string) string) (*builtRequest, error) {
+	u, err := addQueryParams(resolveAlias(resolve(rawURL)), resolveAll(queryParams, resolve))
+	if err != nil {
+		return nil, err
+	}
+	headerMap := parseHeaders(resolveAll(headers, resolve))
+	body, err := applyAuthAndBody(headerMap, resolve(rawBody), resolve)
+	if err != nil {
+		return nil, err
+	}
+	return &builtRequest{url: u, headers: headerMap, body: body}, nil
 }
 
 func parseHeaders(headerStrings []string) map[string]string {
@@ -187,9 +328,11 @@ func parseHeaders(headerStrings []string) map[string]string {
 func saveToHistory(method, url string, headers map[string]string, body string, resp *model.Response) {
 	store, err := storage.NewStorage()
 	if err != nil {
-		// Silently fail - don't interrupt the user
+		// Don't interrupt the user, but don't hide that history was lost either
+		warnStorage("could not save to history", err)
 		return
 	}
+	defer store.Close()
 
 	// Filter sensitive headers before storing
 	filteredHeaders := filterSensitiveHeaders(headers)
@@ -216,7 +359,21 @@ func saveToHistory(method, url string, headers map[string]string, body string, r
 		Response:  filteredResp,
 	}
 
-	_ = store.AddToHistory(req)
+	if err := store.AddToHistory(req); err != nil {
+		warnStorage("could not save to history", err)
+	}
+}
+
+var warnedStorage = map[string]bool{}
+
+// warnStorage prints a non-fatal storage problem to stderr, once per message
+func warnStorage(what string, err error) {
+	msg := fmt.Sprintf("%s: %v", what, err)
+	if warnedStorage[msg] {
+		return
+	}
+	warnedStorage[msg] = true
+	fmt.Fprintf(os.Stderr, "WARNING: %s\n", msg)
 }
 
 func saveRequestToCollection(collectionName, method, url string, headers map[string]string, body string) {
@@ -225,12 +382,13 @@ func saveRequestToCollection(collectionName, method, url string, headers map[str
 		format.PrintError(fmt.Sprintf("Failed to save to collection: %v", err))
 		return
 	}
+	defer store.Close()
 
 	req := model.SavedRequest{
 		Name:    "",
 		Method:  method,
 		URL:     url,
-		Headers: headers,
+		Headers: filterSensitiveHeaders(headers),
 		Body:    body,
 	}
 
@@ -266,12 +424,18 @@ func resolveAlias(url string) string {
 	store, err := storage.NewStorage()
 	if err != nil {
 		// Storage error, return URL as-is
+		warnStorage("could not look up aliases", err)
 		return url
 	}
+	defer store.Close()
 
 	baseURL, exists, err := store.GetAlias(aliasName)
-	if err != nil || !exists {
-		// Alias not found or error, return URL as-is
+	if err != nil {
+		warnStorage("could not look up alias '"+aliasName+"'", err)
+		return url
+	}
+	if !exists {
+		// Not an alias, return URL as-is
 		return url
 	}
 
@@ -338,13 +502,32 @@ func filterSensitiveHeaders(headers map[string]string) map[string]string {
 
 	filtered := make(map[string]string)
 	for k, v := range headers {
-		if sensitiveHeaders[strings.ToLower(k)] {
+		if sensitiveHeaders[strings.ToLower(k)] && !isPlaceholderValue(v) {
 			filtered[k] = "[REDACTED]"
 		} else {
 			filtered[k] = v
 		}
 	}
 	return filtered
+}
+
+// redactedValue replaces sensitive header values in stored requests
+const redactedValue = "[REDACTED]"
+
+// isPlaceholderValue reports whether a header value consists only of
+// {{variable}} placeholders, optionally after an auth scheme word such as
+// "Bearer". Such a value holds no secret, so it is kept as-is and the saved
+// request can be replayed with the variable filled in.
+func isPlaceholderValue(v string) bool {
+	rest, n := vars.StripPlaceholders(v)
+	if n == 0 {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(rest)) {
+	case "", "bearer", "basic", "token":
+		return true
+	}
+	return false
 }
 
 // sensitiveBodyPatterns contains patterns that suggest sensitive data in request bodies

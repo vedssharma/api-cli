@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"api/internal/format"
 	"api/internal/storage"
+	"github.com/spf13/cobra"
 )
 
 func init() {
@@ -62,6 +62,7 @@ func runAliasList(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to load aliases: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	aliases, err := store.LoadAliases()
 	if err != nil {
@@ -81,6 +82,7 @@ func runAliasCreate(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to create alias: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	if err := store.CreateAlias(name, url); err != nil {
 		format.PrintError(fmt.Sprintf("Failed to create alias: %v", err))
@@ -98,6 +100,7 @@ func runAliasShow(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to load alias: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	url, exists, err := store.GetAlias(name)
 	if err != nil {
@@ -121,6 +124,7 @@ func runAliasDelete(cmd *cobra.Command, args []string) {
 		format.PrintError(fmt.Sprintf("Failed to delete alias: %v", err))
 		os.Exit(1)
 	}
+	defer store.Close()
 
 	if err := store.DeleteAlias(name); err != nil {
 		format.PrintError(fmt.Sprintf("Failed to delete alias: %v", err))

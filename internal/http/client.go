@@ -1,12 +1,15 @@
 package http
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"api/internal/model"
@@ -20,18 +23,60 @@ const (
 	DefaultTimeout = 30 * time.Second
 )
 
+// Options configures how a Client sends requests
+type Options struct {
+	Timeout          time.Duration // zero means DefaultTimeout
+	NoFollowRedirect bool          // return 3xx responses instead of following them
+	ProxyURL         string        // empty means use the environment's proxy settings
+	Insecure         bool          // skip TLS certificate verification
+}
+
 // Client wraps the standard http.Client with additional functionality
 type Client struct {
 	client *http.Client
 }
 
-// NewClient creates a new HTTP client
+// NewClient creates a new HTTP client with default options
 func NewClient() *Client {
-	return &Client{
-		client: &http.Client{
-			Timeout: DefaultTimeout,
-		},
+	c, _ := NewClientWithOptions(Options{})
+	return c
+}
+
+// NewClientWithOptions creates a new HTTP client configured by opts
+func NewClientWithOptions(opts Options) (*Client, error) {
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
 	}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Refuse to connect to cloud metadata addresses. Checking here, on the
+	// address actually being dialed, also covers redirects, DNS names that
+	// resolve to them and encoded forms like http://2852039166/.
+	transport.DialContext = (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   blockMetadataAddress,
+	}).DialContext
+	if opts.ProxyURL != "" {
+		proxy, err := url.Parse(opts.ProxyURL)
+		if err != nil || proxy.Host == "" {
+			return nil, fmt.Errorf("invalid proxy URL: %q", opts.ProxyURL)
+		}
+		transport.Proxy = http.ProxyURL(proxy)
+	}
+	if opts.Insecure {
+		fmt.Fprintln(os.Stderr, "WARNING: TLS certificate verification is disabled (--insecure).")
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+
+	client := &http.Client{Timeout: timeout, Transport: transport}
+	if opts.NoFollowRedirect {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+	return &Client{client: client}, nil
 }
 
 // Do executes an HTTP request and returns the response
@@ -92,7 +137,8 @@ func (c *Client) Do(method, reqURL string, headers map[string]string, body strin
 	respHeaders := make(map[string]string)
 	for key, values := range resp.Header {
 		if len(values) > 0 {
-			respHeaders[key] = values[0]
+			// Join repeated headers (e.g. Set-Cookie) so no values are lost
+			respHeaders[key] = strings.Join(values, ", ")
 		}
 	}
 
@@ -103,6 +149,16 @@ func (c *Client) Do(method, reqURL string, headers map[string]string, body strin
 		Body:       string(respBody),
 		DurationMs: duration.Milliseconds(),
 	}, nil
+}
+
+// Head performs a HEAD request
+func (c *Client) Head(url string, headers map[string]string) (*model.Response, error) {
+	return c.Do("HEAD", url, headers, "")
+}
+
+// Options performs an OPTIONS request
+func (c *Client) Options(url string, headers map[string]string) (*model.Response, error) {
+	return c.Do("OPTIONS", url, headers, "")
 }
 
 // Get performs a GET request
@@ -149,9 +205,8 @@ func validateURL(rawURL string) error {
 		return fmt.Errorf("URL must have a hostname")
 	}
 
-	// Block localhost and loopback addresses
-	lowerHost := strings.ToLower(hostname)
-	if lowerHost == "localhost" || lowerHost == "127.0.0.1" || lowerHost == "::1" {
+	// Warn about localhost and loopback addresses
+	if isLoopbackHost(hostname) {
 		fmt.Fprintln(os.Stderr, "WARNING: Making request to localhost/loopback address")
 	}
 
@@ -168,39 +223,75 @@ func validateURL(rawURL string) error {
 	return nil
 }
 
-// isPrivateOrReservedHost checks if the hostname is a private or reserved IP
-func isPrivateOrReservedHost(hostname string) bool {
-	// Check for common private IP patterns
-	privatePatterns := []string{
-		"10.",          // 10.0.0.0/8
-		"192.168.",     // 192.168.0.0/16
-		"172.16.", "172.17.", "172.18.", "172.19.", // 172.16.0.0/12
-		"172.20.", "172.21.", "172.22.", "172.23.",
-		"172.24.", "172.25.", "172.26.", "172.27.",
-		"172.28.", "172.29.", "172.30.", "172.31.",
-		"0.",       // 0.0.0.0/8
-		"169.254.", // Link-local
+// parseHost parses an IP address host, handling IPv6 brackets and zones
+func parseHost(hostname string) net.IP {
+	h := strings.TrimSuffix(strings.TrimPrefix(hostname, "["), "]")
+	if i := strings.Index(h, "%"); i >= 0 {
+		h = h[:i]
 	}
+	return net.ParseIP(h)
+}
 
-	for _, pattern := range privatePatterns {
-		if strings.HasPrefix(hostname, pattern) {
+// isLoopbackHost reports whether the host is localhost or a loopback IP
+func isLoopbackHost(hostname string) bool {
+	lower := strings.ToLower(strings.TrimSuffix(hostname, "."))
+	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") {
+		return true
+	}
+	ip := parseHost(hostname)
+	return ip != nil && ip.IsLoopback()
+}
+
+// isPrivateOrReservedHost checks if the hostname is a private or reserved IP
+// (RFC 1918, unique-local IPv6, link-local, or the unspecified 0.0.0.0/8 range).
+// Host names are never considered private here.
+func isPrivateOrReservedHost(hostname string) bool {
+	ip := parseHost(hostname)
+	if ip == nil {
+		return false
+	}
+	if v4 := ip.To4(); v4 != nil {
+		if v4[0] == 0 { // 0.0.0.0/8
 			return true
 		}
+		ip = v4
 	}
+	return ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
+}
 
-	return false
+// metadataIPs are cloud metadata service addresses (common SSRF targets)
+var metadataIPs = []net.IP{
+	net.ParseIP("169.254.169.254"), // AWS, GCP, Azure metadata
+	net.ParseIP("169.254.170.2"),   // AWS ECS task metadata
+	net.ParseIP("100.100.100.200"), // Alibaba Cloud metadata
+	net.ParseIP("fd00:ec2::254"),   // AWS metadata over IPv6
 }
 
 // isCloudMetadataEndpoint checks if the hostname is a cloud metadata service
 func isCloudMetadataEndpoint(hostname string) bool {
-	// Block common cloud metadata endpoints (SSRF targets)
-	metadataHosts := map[string]bool{
-		"169.254.169.254":          true, // AWS, GCP, Azure metadata
-		"metadata.google.internal": true, // GCP metadata
-		"metadata.goog":            true, // GCP metadata alternative
-		"100.100.100.200":          true, // Alibaba Cloud metadata
-		"169.254.170.2":            true, // AWS ECS task metadata
+	lower := strings.ToLower(strings.TrimSuffix(hostname, "."))
+	if lower == "metadata.google.internal" || lower == "metadata.goog" {
+		return true
 	}
+	if ip := parseHost(hostname); ip != nil {
+		for _, m := range metadataIPs {
+			if ip.Equal(m) { // Equal also matches IPv4-mapped IPv6 forms
+				return true
+			}
+		}
+	}
+	return false
+}
 
-	return metadataHosts[strings.ToLower(hostname)]
+// blockMetadataAddress is a net.Dialer Control function that rejects
+// connections to cloud metadata addresses.
+func blockMetadataAddress(network, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		host = address
+	}
+	if isCloudMetadataEndpoint(host) {
+		return fmt.Errorf("blocked connection to cloud metadata endpoint: %s", host)
+	}
+	return nil
 }

@@ -1,7 +1,10 @@
 services:
   apicli:
     build: .
+    # The image runs as the non-root user "appuser" (uid 1000), so data lives
+    # in that user's home. Create ./data with `mkdir -p data` first, and make
+    # sure uid 1000 can write to it (or use a named volume instead).
     volumes:
-      - ./data:/root/.apicli
+      - ./data:/home/appuser/.apicli
     # Pass all arguments to the CLI
     # Usage: docker-compose run --rm apicli get https://example.com
