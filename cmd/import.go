@@ -67,6 +67,7 @@ Examples:
 
 	importCmd.AddCommand(postmanImportCmd)
 	registerImportCurl(importCmd)
+	registerImportFiles(importCmd)
 	rootCmd.AddCommand(importCmd)
 }
 
